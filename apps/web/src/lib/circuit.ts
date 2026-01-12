@@ -206,8 +206,7 @@ export function isCircuitCached(circuitType: CircuitType): boolean {
 export function getCircuitInfo(circuitType: CircuitType): {
   cached: boolean;
   loadedAt?: number;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  abi?: any;
+  abi?: unknown;
 } | null {
   const cached = circuitCache.get(circuitType);
   if (!cached) {

@@ -123,16 +123,31 @@ export interface VerificationResult {
   /** Error message if failed */
   error?: string;
   /** Error code for programmatic handling */
-  errorCode?: string;
+  errorCode?: VouchErrorCode;
 }
 
-// === Circuit Types (matching Noir ABI) ===
+// === Serialization Types ===
+
+/** Serialized proof result for storage/transmission (JSON-safe) */
+export interface SerializedProofResult {
+  /** Proof bytes as hex string */
+  proof: string;
+  /** Public inputs array */
+  publicInputs: string[];
+  /** Nullifier hash (hex encoded) */
+  nullifier: string;
+  /** Commitment hash (hex encoded) */
+  commitment: string;
+}
+
+// === Circuit Types (matching NoirJS InputMap format) ===
+// Note: NoirJS accepts all numeric values as strings
 
 export interface DevReputationCircuitInputs {
   wallet_pubkey: number[];
   secret: number[];
-  program_count: number;
-  tvl_amounts: number[];
+  program_count: string;
+  tvl_amounts: string[];
   min_tvl: string;
   commitment: number[];
   nullifier: number[];
@@ -141,8 +156,8 @@ export interface DevReputationCircuitInputs {
 export interface WhaleTradingCircuitInputs {
   wallet_pubkey: number[];
   secret: number[];
-  trade_count: number;
-  trade_amounts: number[];
+  trade_count: string;
+  trade_amounts: string[];
   min_volume: string;
   commitment: number[];
   nullifier: number[];
