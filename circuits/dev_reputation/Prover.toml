@@ -1,0 +1,11 @@
+# Test inputs for dev_reputation circuit
+# These values are used for local testing with `nargo prove`
+
+# Private inputs
+wallet_pubkey = ["1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1"]
+secret = ["2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2", "2"]
+program_count = "3"
+tvl_amounts = ["50000", "40000", "30000", "0", "0"]
+
+# Public inputs (will be verified on-chain)
+min_tvl = "100000"

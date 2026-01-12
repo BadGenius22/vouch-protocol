@@ -1,0 +1,2 @@
+[workspace]
+members = ["dev_reputation", "whale_trading"]

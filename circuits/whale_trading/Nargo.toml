@@ -1,0 +1,7 @@
+[package]
+name = "whale_trading"
+type = "bin"
+authors = ["Vouch Protocol"]
+compiler_version = ">=0.30.0"
+
+[dependencies]

@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+apps/web/.next/
+apps/web/out/
+target/
+
+# Environment
+.env
+.env.local
+.env.*.local
+apps/web/.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+
+# Logs
+*.log
+
+# Noir
+circuits/*/target/
+circuits/*/proofs/
+
+# Anchor
+.anchor/
+programs/*/target/
+
+# Testing
+coverage/
+
+# Misc
+*.tsbuildinfo
+.turbo/

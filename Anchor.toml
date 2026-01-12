@@ -1,0 +1,26 @@
+[toolchain]
+anchor_version = "0.29.0"
+
+[features]
+seeds = false
+skip-lint = false
+
+[programs.localnet]
+vouch_verifier = "VouchXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+
+[programs.devnet]
+vouch_verifier = "VouchXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"
+
+[workspace]
+members = ["programs/*"]
+types = "apps/web/src/idl/"
+
+[scripts]
+test = "pnpm exec ts-mocha -p ./tsconfig.anchor.json -t 1000000 tests/**/*.ts"
