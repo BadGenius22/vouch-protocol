@@ -2,7 +2,7 @@
 // Proves: "I control a wallet that traded >= min_volume in the period"
 // Without revealing: which wallet, which trades, exact volume
 
-use std::hash::sha256;
+use std::hash::blake2s;
 
 // Maximum number of trades to prove
 global MAX_TRADES: u32 = 20;
@@ -25,7 +25,7 @@ fn main(
         preimage[i] = wallet_pubkey[i];
         preimage[i + 32] = secret[i];
     }
-    let computed_commitment = sha256(preimage);
+    let computed_commitment: [u8; 32] = blake2s(preimage);
     assert(computed_commitment == commitment);
 
     // 2. Verify trade count is valid
@@ -42,18 +42,20 @@ fn main(
     assert(total_volume >= min_volume);
 
     // 5. Verify nullifier is derived correctly
-    // nullifier = hash(wallet_pubkey || "vouch_whale")
+    // nullifier = hash(wallet_pubkey || domain_separator)
+    // Domain separator: "vouch_whale" padded to 32 bytes
     let mut nullifier_preimage: [u8; 64] = [0; 64];
     for i in 0..32 {
         nullifier_preimage[i] = wallet_pubkey[i];
     }
-    // Domain separator: "vouch_whale" in ASCII
+    // Domain separator: "vouch_whale" in ASCII (11 bytes, rest padded with zeros)
     let domain: [u8; 11] = [118, 111, 117, 99, 104, 95, 119, 104, 97, 108, 101];
     for i in 0..11 {
         nullifier_preimage[32 + i] = domain[i];
     }
-    let computed_nullifier = sha256(nullifier_preimage);
+    let computed_nullifier: [u8; 32] = blake2s(nullifier_preimage);
 
+    // Compare nullifier byte by byte
     for i in 0..32 {
         assert(computed_nullifier[i] == nullifier[i]);
     }
@@ -70,7 +72,7 @@ fn test_valid_whale_proof() {
         preimage[i] = wallet_pubkey[i];
         preimage[i + 32] = secret[i];
     }
-    let commitment = sha256(preimage);
+    let commitment: [u8; 32] = blake2s(preimage);
 
     // Compute nullifier
     let mut nullifier_preimage: [u8; 64] = [0; 64];
@@ -81,7 +83,7 @@ fn test_valid_whale_proof() {
     for i in 0..11 {
         nullifier_preimage[32 + i] = domain[i];
     }
-    let nullifier = sha256(nullifier_preimage);
+    let nullifier: [u8; 32] = blake2s(nullifier_preimage);
 
     // Volume: 10K + 15K + 20K + 5K + 25K = 75K (meets 50K threshold)
     let mut trade_amounts: [u64; MAX_TRADES] = [0; MAX_TRADES];
@@ -97,6 +99,45 @@ fn test_valid_whale_proof() {
         5,
         trade_amounts,
         50000,
+        commitment,
+        nullifier
+    );
+}
+
+#[test]
+fn test_high_volume_whale() {
+    let wallet_pubkey: [u8; 32] = [5; 32];
+    let secret: [u8; 32] = [6; 32];
+
+    let mut preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        preimage[i] = wallet_pubkey[i];
+        preimage[i + 32] = secret[i];
+    }
+    let commitment: [u8; 32] = blake2s(preimage);
+
+    let mut nullifier_preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        nullifier_preimage[i] = wallet_pubkey[i];
+    }
+    let domain: [u8; 11] = [118, 111, 117, 99, 104, 95, 119, 104, 97, 108, 101];
+    for i in 0..11 {
+        nullifier_preimage[32 + i] = domain[i];
+    }
+    let nullifier: [u8; 32] = blake2s(nullifier_preimage);
+
+    // High volume: 500K total (meets 100K threshold)
+    let mut trade_amounts: [u64; MAX_TRADES] = [0; MAX_TRADES];
+    trade_amounts[0] = 100000;
+    trade_amounts[1] = 150000;
+    trade_amounts[2] = 250000;
+
+    main(
+        wallet_pubkey,
+        secret,
+        3,
+        trade_amounts,
+        100000,
         commitment,
         nullifier
     );

@@ -11,7 +11,7 @@ Vouch Protocol is a zero-knowledge proof-based anonymous reputation protocol for
 ## Tech Stack
 
 - **Blockchain:** Solana (Anchor 0.29+)
-- **ZK Framework:** Noir + Barretenberg (client-side proof generation)
+- **ZK Framework:** Noir 1.0.0-beta.18 + UltraHonk (@aztec/bb.js) - client-side proof generation
 - **Frontend:** Next.js 14 (App Router)
 - **Styling:** Tailwind CSS, shadcn/ui
 - **Data:** Helius SDK (via Server Actions)
@@ -36,8 +36,9 @@ vouch-protocol/
 │           │   └── wallet/
 │           ├── idl/             # Generated Anchor IDL
 │           └── lib/
-│               ├── types.ts     # Shared TypeScript types
-│               ├── proof.ts     # Client-side proof generation
+│               ├── types.ts     # Shared TypeScript types & errors
+│               ├── circuit.ts   # Circuit loader utility
+│               ├── proof.ts     # Client-side proof generation (NoirJS)
 │               ├── verify.ts    # On-chain verification helpers
 │               └── utils.ts     # Utility functions
 ├── circuits/                    # Noir ZK circuits (workspace)
@@ -138,7 +139,23 @@ export async function getDeployedPrograms(wallet: string) {
 // apps/web/src/lib/proof.ts
 export async function generateDevReputationProof(input) {
   // Runs in browser - data never leaves device
-  // TODO: Integrate NoirJS + Barretenberg WASM (currently mock)
+  // Uses NoirJS + UltraHonk WASM for real ZK proof generation
+  const { noir, backend } = await loadCircuit('dev_reputation');
+  const { witness } = await noir.execute(circuitInputs);
+  const proofData = await backend.generateProof(witness);
+}
+```
+
+### Circuit Loader (WASM management)
+```typescript
+// apps/web/src/lib/circuit.ts
+// Handles loading compiled circuits and caching
+import { UltraHonkBackend } from '@aztec/bb.js';
+
+export async function loadCircuit(circuitType: CircuitType) {
+  // Fetches from /public/circuits/{type}.json
+  // Initializes UltraHonkBackend (WASM) - uses SharedArrayBuffer with COOP/COEP headers
+  // Caches for 1 hour with race condition prevention
 }
 ```
 
@@ -173,25 +190,27 @@ pub fn verify_dev_reputation(ctx, proof, public_inputs, min_tvl) -> Result<()>
 
 ### Developer Reputation (`circuits/dev_reputation/src/main.nr`)
 - **Proves:** "I control a wallet with ≥ min_tvl TVL across deployed programs"
-- **Private inputs:** wallet_pubkey, secret, program_count, tvl_amounts[5]
-- **Public inputs:** min_tvl, commitment, nullifier
+- **Private inputs:** wallet_pubkey[32], secret[32], program_count, tvl_amounts[5]
+- **Public inputs:** min_tvl, commitment[32], nullifier[32]
 - **Constraints:**
-  - `commitment == sha256(wallet_pubkey || secret)`
+  - `commitment == blake2s(wallet_pubkey || secret)`
   - `sum(tvl_amounts) >= min_tvl`
-  - `nullifier == sha256(wallet_pubkey || "vouch_dev")`
+  - `nullifier == blake2s(wallet_pubkey || "vouch_dev" || zeros)`
 
 ### Whale Trading (`circuits/whale_trading/`)
 - **Proves:** "I traded ≥ min_volume in the period"
+- **Private inputs:** wallet_pubkey[32], secret[32], trade_count, trade_amounts[20]
 - **Same pattern** with domain separator "vouch_whale"
 
 ### Nullifier Pattern
 ```
-commitment = sha256(wallet_pubkey || secret)
-nullifier = sha256(wallet_pubkey || domain_separator)
+commitment = blake2s(wallet_pubkey || secret)  // 64 bytes → 32 bytes
+nullifier = blake2s(wallet_pubkey || domain || zeros)  // 64 bytes → 32 bytes
 ```
+- **Hash function:** blake2s (from Noir std library)
 - Commitment links wallet to proof (proves knowledge)
 - Nullifier prevents double-proving (unique per wallet + proof_type)
-- Domain separator: "vouch_dev" or "vouch_whale"
+- Domain separator: "vouch_dev" (9 bytes) or "vouch_whale" (11 bytes), padded with zeros
 
 ## Environment Variables
 
@@ -205,21 +224,47 @@ HELIUS_API_KEY=xxx  # Server-side only (optional - falls back to mock)
 
 ## Current Implementation Status
 
-**Completed:**
+**Completed (Phase 1):**
 - Anchor program with commitment, nullifier, and verification instructions
-- Noir circuits for dev_reputation and whale_trading
+- Noir circuits for dev_reputation and whale_trading (using blake2s)
+- Circuit compilation with Nargo 1.0.0-beta.18
+- NoirJS 1.0.0-beta.18 + UltraHonk (@aztec/bb.js@0.82.3) integration for proof generation
+- Circuit loader utility with caching and race condition prevention
+- COOP/COEP headers for SharedArrayBuffer multithreading support
+- Circuit preloading on app initialization for better UX
+- Error handling with VouchError types
 - Next.js frontend with wallet connection and proof flow UI
 - Server Actions for Helius data fetching (with mock fallback)
-- TypeScript types and proof generation helpers
+- TypeScript types with strict typing
 
-**TODO:**
-- Integrate real NoirJS + Barretenberg for proof generation (currently mock)
-- Implement actual Groth16/UltraPlonk verification in Anchor program
+**TODO (Phase 2+):**
+- Implement actual proof verification in Anchor program
 - Connect to real Helius API for on-chain data
 - Mint credential NFT on successful verification
 - Deploy to devnet with real program ID
 
+## Version Compatibility
+
+| Component | Version |
+|-----------|---------|
+| Nargo CLI | 1.0.0-beta.18 |
+| @noir-lang/noir_js | 1.0.0-beta.18 |
+| @aztec/bb.js | 0.82.3 |
+| @noir-lang/types | 1.0.0-beta.18 |
+
+**Note:** All Noir components must use matching versions. Pin exact versions to avoid type conflicts.
+
+## Proving System Choice
+
+**UltraHonk** (current) vs **UltraPlonk**:
+
+| Backend | Proving Speed | RAM Usage | On-Chain Gas | Best For |
+|---------|---------------|-----------|--------------|----------|
+| UltraHonk | ⚡ Faster | Lower | Higher | Browser/Client proofs |
+| UltraPlonk | Slower | Higher | Lower | EVM on-chain verification |
+
+We use UltraHonk because Vouch generates proofs client-side and verifies on Solana (not EVM).
+
 ## Reference Documents
 
-- **PLAN.md:** Technical specification with code examples
-- **STRATEGY.md:** Hackathon strategy and pitch
+- **IMPLEMENTATION_PLAN.md:** Detailed execution plan with 6 phases

@@ -34,10 +34,11 @@ programs/*/target/
 # Testing
 coverage/
 
-# Misc
+# Misc 
 *.tsbuildinfo
 .turbo/
 
 .claude/
 PLAN.md 
 STRATEGY.md 
+IMPLEMENTATION_PLAN.md

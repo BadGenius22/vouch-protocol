@@ -6,8 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { WalletButton } from '@/components/wallet/wallet-button';
 import { getDeployedPrograms } from '@/app/actions/helius';
-import type { ProgramData } from '@/lib/types';
-import { generateDevReputationProof } from '@/lib/proof';
+import type { ProgramData, ProofResult } from '@/lib/types';
 import { Loader2, CheckCircle, XCircle } from 'lucide-react';
 
 type Step = 'connect' | 'fetch' | 'generate' | 'verify';
@@ -18,7 +17,7 @@ export default function DeveloperPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [programs, setPrograms] = useState<ProgramData[]>([]);
-  const [proof, setProof] = useState<Uint8Array | null>(null);
+  const [proofResult, setProofResult] = useState<ProofResult | null>(null);
 
   const handleFetchData = async () => {
     if (!publicKey) return;
@@ -43,12 +42,14 @@ export default function DeveloperPage() {
     setError(null);
 
     try {
+      // Dynamic import to avoid SSR issues with WASM
+      const { generateDevReputationProof } = await import('@/lib/proof');
       const result = await generateDevReputationProof({
         walletPubkey: publicKey.toBase58(),
         programs,
         minTvl: 100000,
       });
-      setProof(result.proof);
+      setProofResult(result);
       setStep('verify');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate proof');
@@ -142,7 +143,7 @@ export default function DeveloperPage() {
             </div>
           )}
 
-          {step === 'verify' && proof && (
+          {step === 'verify' && proofResult && (
             <div className="space-y-4">
               <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
                 <div className="flex items-center gap-2 mb-2">
@@ -153,9 +154,15 @@ export default function DeveloperPage() {
                   Your ZK proof proves you meet the criteria without revealing your wallet.
                 </p>
               </div>
-              <div className="p-4 bg-muted rounded-lg">
-                <p className="text-sm text-muted-foreground">Proof Size</p>
-                <p className="font-mono">{proof.length} bytes</p>
+              <div className="p-4 bg-muted rounded-lg space-y-2">
+                <div>
+                  <p className="text-sm text-muted-foreground">Proof Size</p>
+                  <p className="font-mono">{proofResult.proof.length} bytes</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Nullifier</p>
+                  <p className="font-mono text-xs break-all">{proofResult.nullifier.slice(0, 32)}...</p>
+                </div>
               </div>
               <Button className="w-full" disabled>Submit to Verifier (Coming Soon)</Button>
             </div>
