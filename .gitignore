@@ -37,3 +37,7 @@ coverage/
 # Misc
 *.tsbuildinfo
 .turbo/
+
+.claude/
+PLAN.md 
+STRATEGY.md 

@@ -86,8 +86,12 @@ pnpm circuits:prove              # Generate proofs (workspace)
 
 # Anchor (Solana)
 pnpm anchor:build                # Build Solana program
-pnpm anchor:test                 # Run integration tests
+pnpm anchor:test                 # Run integration tests (ts-mocha)
 pnpm anchor:deploy               # Deploy to devnet
+
+# Turborepo filtering
+pnpm --filter @vouch/web dev     # Run specific app
+pnpm --filter @vouch/web build   # Build specific app
 
 # Maintenance
 pnpm clean                       # Clean all build artifacts
@@ -110,26 +114,14 @@ pnpm clean                       # Clean all build artifacts
 ┌───────────────────────────┐   ┌─────────────────────────────┐
 │ Noir Circuits             │   │ Anchor Program              │
 │ circuits/                 │   │ programs/vouch-verifier     │
-│ • dev_reputation          │   │ • init_nullifier            │
-│ • whale_trading           │   │ • verify_dev_reputation     │
-│                           │   │ • verify_whale_trading      │
-│ Workspace compilation     │   │ • nullifier registry (PDA)  │
+│ • dev_reputation          │   │ • create_commitment         │
+│ • whale_trading           │   │ • init_nullifier            │
+│                           │   │ • verify_dev_reputation     │
+│ Workspace compilation     │   │ • verify_whale_trading      │
 └───────────────────────────┘   └─────────────────────────────┘
 ```
 
 ## Key Patterns
-
-### Turborepo Workspace
-```bash
-pnpm --filter @vouch/web dev     # Run specific app
-pnpm --filter @vouch/web build   # Build specific app
-```
-
-### Noir Workspace
-All circuits compile together via workspace:
-```bash
-cd circuits && nargo compile --workspace
-```
 
 ### Server Actions (secure data fetching)
 ```typescript
@@ -137,14 +129,8 @@ cd circuits && nargo compile --workspace
 'use server';
 export async function getDeployedPrograms(wallet: string) {
   // HELIUS_API_KEY never exposed to client
+  // Falls back to mock data if key not set
 }
-```
-
-### Shared Types
-```typescript
-// apps/web/src/lib/types.ts - Single source of truth
-export interface ProofResult { ... }
-export interface ProgramData { ... }
 ```
 
 ### Client-side Proof Generation
@@ -152,14 +138,21 @@ export interface ProgramData { ... }
 // apps/web/src/lib/proof.ts
 export async function generateDevReputationProof(input) {
   // Runs in browser - data never leaves device
-  // Uses NoirJS + Barretenberg WASM
+  // TODO: Integrate NoirJS + Barretenberg WASM (currently mock)
 }
 ```
 
-### Anchor Security Pattern
-Nullifier initialization is separate from verification:
+### Anchor Account Structure
 ```rust
-// Step 1: Initialize (creates account)
+// programs/vouch-verifier/src/lib.rs
+// PDA seeds for nullifier: [b"nullifier", nullifier.as_ref()]
+// PDA seeds for commitment: [b"commitment", commitment.as_ref()]
+```
+
+### Two-Step Verification Pattern
+Nullifier initialization is separate from verification for security:
+```rust
+// Step 1: Initialize (creates PDA account)
 pub fn init_nullifier(ctx, nullifier) -> Result<()>
 
 // Step 2: Verify (marks as used)
@@ -178,23 +171,27 @@ pub fn verify_dev_reputation(ctx, proof, public_inputs, min_tvl) -> Result<()>
 
 ## Circuit Logic
 
-### Developer Reputation
-- **Proves:** "I control a wallet with ≥$100K TVL across deployed programs"
-- **Private:** wallet_pubkey, secret, program addresses, TVL amounts
-- **Public:** commitment, min_tvl, nullifier
+### Developer Reputation (`circuits/dev_reputation/src/main.nr`)
+- **Proves:** "I control a wallet with ≥ min_tvl TVL across deployed programs"
+- **Private inputs:** wallet_pubkey, secret, program_count, tvl_amounts[5]
+- **Public inputs:** min_tvl, commitment, nullifier
+- **Constraints:**
+  - `commitment == sha256(wallet_pubkey || secret)`
+  - `sum(tvl_amounts) >= min_tvl`
+  - `nullifier == sha256(wallet_pubkey || "vouch_dev")`
 
-### Whale Trading
-- **Proves:** "I traded ≥$50K volume in 30 days"
-- **Private:** wallet_pubkey, secret, trade amounts
-- **Public:** commitment, min_volume, nullifier
+### Whale Trading (`circuits/whale_trading/`)
+- **Proves:** "I traded ≥ min_volume in the period"
+- **Same pattern** with domain separator "vouch_whale"
 
 ### Nullifier Pattern
 ```
-commitment = hash(wallet_pubkey || secret)
-nullifier = hash(wallet_pubkey || domain_separator)
+commitment = sha256(wallet_pubkey || secret)
+nullifier = sha256(wallet_pubkey || domain_separator)
 ```
-- Commitment links wallet to proof
+- Commitment links wallet to proof (proves knowledge)
 - Nullifier prevents double-proving (unique per wallet + proof_type)
+- Domain separator: "vouch_dev" or "vouch_whale"
 
 ## Environment Variables
 
@@ -203,8 +200,24 @@ nullifier = hash(wallet_pubkey || domain_separator)
 NEXT_PUBLIC_SOLANA_NETWORK=devnet
 NEXT_PUBLIC_SOLANA_RPC_URL=https://api.devnet.solana.com
 NEXT_PUBLIC_VERIFIER_PROGRAM_ID=VouchXXX...
-HELIUS_API_KEY=xxx  # Server-side only
+HELIUS_API_KEY=xxx  # Server-side only (optional - falls back to mock)
 ```
+
+## Current Implementation Status
+
+**Completed:**
+- Anchor program with commitment, nullifier, and verification instructions
+- Noir circuits for dev_reputation and whale_trading
+- Next.js frontend with wallet connection and proof flow UI
+- Server Actions for Helius data fetching (with mock fallback)
+- TypeScript types and proof generation helpers
+
+**TODO:**
+- Integrate real NoirJS + Barretenberg for proof generation (currently mock)
+- Implement actual Groth16/UltraPlonk verification in Anchor program
+- Connect to real Helius API for on-chain data
+- Mint credential NFT on successful verification
+- Deploy to devnet with real program ID
 
 ## Reference Documents
 
