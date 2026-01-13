@@ -15,9 +15,17 @@
  * @see programs/vouch-verifier/src/lib.rs for the on-chain verifier
  */
 
-import { Connection, PublicKey, Transaction } from '@solana/web3.js';
+import {
+  Connection,
+  PublicKey,
+  Transaction,
+  SystemProgram,
+  TransactionInstruction,
+} from '@solana/web3.js';
+import { Program, AnchorProvider, BN, Idl } from '@coral-xyz/anchor';
 import type { ProofResult, VerificationResult, ProofType } from './types';
 import { VouchError, VouchErrorCode } from './types';
+import IDL from './idl/vouch_verifier.json';
 
 // === Debug Mode ===
 const DEBUG = process.env.NODE_ENV === 'development';
@@ -43,7 +51,7 @@ function isValidHex64(hex: string): boolean {
 // === Constants ===
 
 /** Default verifier program ID (update after deployment) */
-const DEFAULT_PROGRAM_ID = 'VouchXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX';
+const DEFAULT_PROGRAM_ID = 'FGoZca8WMS9EK6TSgDf2cFdGH3uiwH3ThFKfE5KdjGAg';
 
 /** PDA seeds */
 const NULLIFIER_SEED = 'nullifier';
@@ -271,26 +279,154 @@ export async function preVerificationChecks(
   }
 }
 
+// === Instruction Builders ===
+
+/**
+ * Build the init_nullifier instruction
+ */
+export function buildInitNullifierInstruction(
+  nullifierBytes: Uint8Array,
+  nullifierPda: PublicKey,
+  payer: PublicKey
+): TransactionInstruction {
+  const programId = getVerifierProgram();
+
+  // Anchor discriminator for init_nullifier
+  const discriminator = Buffer.from([
+    0x9b, 0x3b, 0x85, 0x2a, 0x4c, 0x89, 0x0c, 0x84
+  ]);
+
+  // Instruction data: discriminator + nullifier (32 bytes)
+  const data = Buffer.concat([discriminator, Buffer.from(nullifierBytes)]);
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: nullifierPda, isSigner: false, isWritable: true },
+      { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    programId,
+    data,
+  });
+}
+
+/**
+ * Build the verify_dev_reputation instruction
+ */
+export function buildVerifyDevReputationInstruction(
+  proof: Uint8Array,
+  publicInputs: Uint8Array,
+  minTvl: bigint,
+  nullifierPda: PublicKey,
+  recipient: PublicKey,
+  payer: PublicKey
+): TransactionInstruction {
+  const programId = getVerifierProgram();
+
+  // Anchor discriminator for verify_dev_reputation
+  const discriminator = Buffer.from([
+    0xf5, 0xa5, 0x6c, 0x2e, 0x9b, 0x3d, 0x1f, 0x8a
+  ]);
+
+  // Build instruction data
+  // Format: discriminator + proof_len (4 bytes) + proof + public_inputs_len (4 bytes) + public_inputs + min_tvl (8 bytes)
+  const proofLen = Buffer.alloc(4);
+  proofLen.writeUInt32LE(proof.length, 0);
+
+  const publicInputsLen = Buffer.alloc(4);
+  publicInputsLen.writeUInt32LE(publicInputs.length, 0);
+
+  const minTvlBuf = Buffer.alloc(8);
+  minTvlBuf.writeBigUInt64LE(minTvl, 0);
+
+  const data = Buffer.concat([
+    discriminator,
+    proofLen,
+    Buffer.from(proof),
+    publicInputsLen,
+    Buffer.from(publicInputs),
+    minTvlBuf,
+  ]);
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: nullifierPda, isSigner: false, isWritable: true },
+      { pubkey: recipient, isSigner: false, isWritable: false },
+      { pubkey: payer, isSigner: true, isWritable: true },
+    ],
+    programId,
+    data,
+  });
+}
+
+/**
+ * Build the verify_whale_trading instruction
+ */
+export function buildVerifyWhaleTradingInstruction(
+  proof: Uint8Array,
+  publicInputs: Uint8Array,
+  minVolume: bigint,
+  nullifierPda: PublicKey,
+  recipient: PublicKey,
+  payer: PublicKey
+): TransactionInstruction {
+  const programId = getVerifierProgram();
+
+  // Anchor discriminator for verify_whale_trading
+  const discriminator = Buffer.from([
+    0xa3, 0xc7, 0x5e, 0x1d, 0x8b, 0x2f, 0x4a, 0x9c
+  ]);
+
+  // Build instruction data (same format as dev reputation)
+  const proofLen = Buffer.alloc(4);
+  proofLen.writeUInt32LE(proof.length, 0);
+
+  const publicInputsLen = Buffer.alloc(4);
+  publicInputsLen.writeUInt32LE(publicInputs.length, 0);
+
+  const minVolumeBuf = Buffer.alloc(8);
+  minVolumeBuf.writeBigUInt64LE(minVolume, 0);
+
+  const data = Buffer.concat([
+    discriminator,
+    proofLen,
+    Buffer.from(proof),
+    publicInputsLen,
+    Buffer.from(publicInputs),
+    minVolumeBuf,
+  ]);
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: nullifierPda, isSigner: false, isWritable: true },
+      { pubkey: recipient, isSigner: false, isWritable: false },
+      { pubkey: payer, isSigner: true, isWritable: true },
+    ],
+    programId,
+    data,
+  });
+}
+
 // === Proof Submission ===
+
+/** Minimum threshold values */
+export const MIN_TVL_THRESHOLD = 10000; // $10,000 USD
+export const MIN_VOLUME_THRESHOLD = 50000; // $50,000 USD
 
 /**
  * Submit a proof to the on-chain verifier
  *
- * Note: This is a placeholder implementation. The actual implementation
- * requires the Anchor IDL to be generated and integrated.
- *
  * The verification flow is:
- * 1. Initialize nullifier account (if not exists)
+ * 1. Initialize nullifier account
  * 2. Submit proof for verification
- * 3. On-chain program verifies the proof
- * 4. If valid, nullifier is marked as used
- * 5. Optionally mint credential NFT
+ * 3. On-chain program validates and marks nullifier as used
  *
  * @param connection - Solana connection
  * @param proof - The proof result to submit
  * @param proofType - Type of proof (developer or whale)
  * @param payer - The wallet paying for the transaction
  * @param signTransaction - Function to sign the transaction
+ * @param recipient - Optional recipient for credential (defaults to payer)
  * @returns Verification result
  */
 export async function submitProofToChain(
@@ -298,7 +434,8 @@ export async function submitProofToChain(
   proof: ProofResult,
   proofType: ProofType,
   payer: PublicKey,
-  signTransaction: (tx: Transaction) => Promise<Transaction>
+  signTransaction: (tx: Transaction) => Promise<Transaction>,
+  recipient?: PublicKey
 ): Promise<VerificationResult> {
   try {
     debugLog('Starting proof submission...');
@@ -316,63 +453,108 @@ export async function submitProofToChain(
     }
 
     // Derive PDAs
+    const nullifierBytes = Buffer.from(proof.nullifier, 'hex');
     const [nullifierPda] = deriveNullifierPDA(proof.nullifier);
-    const [commitmentPda] = deriveCommitmentPDA(proof.commitment);
 
     debugLog('PDAs derived:', {
       program: getVerifierProgram().toBase58(),
       nullifierPda: nullifierPda.toBase58(),
-      commitmentPda: commitmentPda.toBase58(),
       proofType,
     });
 
-    // TODO: Build actual instruction with Anchor IDL
-    // const program = new Program(IDL, getVerifierProgram(), provider);
-    //
-    // Step 1: Initialize nullifier account
-    // const initNullifierIx = await program.methods
-    //   .initNullifier(Buffer.from(proof.nullifier, 'hex'))
-    //   .accounts({
-    //     nullifierAccount: nullifierPda,
-    //     payer,
-    //     systemProgram: SystemProgram.programId,
-    //   })
-    //   .instruction();
-    //
-    // Step 2: Verify proof
-    // const verifyIx = await program.methods
-    //   .verifyDevReputation(
-    //     Array.from(proof.proof),
-    //     proof.publicInputs.map(pi => Array.from(Buffer.from(pi, 'hex'))),
-    //     new BN(minTvl)
-    //   )
-    //   .accounts({
-    //     nullifierAccount: nullifierPda,
-    //     commitmentAccount: commitmentPda,
-    //     payer,
-    //     systemProgram: SystemProgram.programId,
-    //   })
-    //   .instruction();
-    //
-    // const tx = new Transaction().add(initNullifierIx).add(verifyIx);
-    // const signedTx = await signTransaction(tx);
-    // const signature = await connection.sendRawTransaction(signedTx.serialize());
-    // await connection.confirmTransaction(signature);
+    // Build transaction with both instructions
+    const tx = new Transaction();
 
-    // Placeholder response for development
-    debugLog('Proof submission completed (mock)');
+    // Get recent blockhash
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+    tx.recentBlockhash = blockhash;
+    tx.feePayer = payer;
+
+    // Add init_nullifier instruction
+    const initNullifierIx = buildInitNullifierInstruction(
+      nullifierBytes,
+      nullifierPda,
+      payer
+    );
+    tx.add(initNullifierIx);
+
+    // Add verification instruction based on proof type
+    const proofBytes = proof.proof;
+    const publicInputsBytes = Buffer.from(
+      proof.publicInputs.map(pi => Buffer.from(pi, 'hex')).reduce(
+        (acc, buf) => Buffer.concat([acc, buf]),
+        Buffer.alloc(0)
+      )
+    );
+    const recipientPubkey = recipient || payer;
+
+    if (proofType === 'developer') {
+      const verifyIx = buildVerifyDevReputationInstruction(
+        proofBytes,
+        publicInputsBytes,
+        BigInt(MIN_TVL_THRESHOLD),
+        nullifierPda,
+        recipientPubkey,
+        payer
+      );
+      tx.add(verifyIx);
+    } else {
+      const verifyIx = buildVerifyWhaleTradingInstruction(
+        proofBytes,
+        publicInputsBytes,
+        BigInt(MIN_VOLUME_THRESHOLD),
+        nullifierPda,
+        recipientPubkey,
+        payer
+      );
+      tx.add(verifyIx);
+    }
+
+    debugLog('Transaction built, requesting signature...');
+
+    // Sign and send transaction
+    const signedTx = await signTransaction(tx);
+    const signature = await connection.sendRawTransaction(signedTx.serialize(), {
+      skipPreflight: false,
+      preflightCommitment: 'confirmed',
+    });
+
+    debugLog('Transaction sent:', signature);
+
+    // Confirm transaction
+    const confirmation = await connection.confirmTransaction({
+      signature,
+      blockhash,
+      lastValidBlockHeight,
+    }, 'confirmed');
+
+    if (confirmation.value.err) {
+      throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+    }
+
+    debugLog('Proof submission completed successfully');
 
     return {
       success: true,
-      signature: 'mock_signature_' + Date.now().toString(36),
+      signature,
     };
   } catch (error) {
     if (DEBUG) console.error('[Vouch] Proof submission failed:', error);
 
+    // Parse Anchor errors
+    const errorMessage = error instanceof Error ? error.message : 'Verification failed';
+    let errorCode = VouchErrorCode.TRANSACTION_FAILED;
+
+    if (errorMessage.includes('NullifierAlreadyUsed')) {
+      errorCode = VouchErrorCode.NULLIFIER_ALREADY_USED;
+    } else if (errorMessage.includes('InvalidProof')) {
+      errorCode = VouchErrorCode.PROOF_GENERATION_FAILED;
+    }
+
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Verification failed',
-      errorCode: VouchErrorCode.TRANSACTION_FAILED,
+      error: errorMessage,
+      errorCode,
     };
   }
 }
@@ -406,14 +588,27 @@ export function getProofPDAs(proof: ProofResult): {
  * @returns Estimated cost in lamports
  */
 export async function estimateVerificationCost(connection: Connection): Promise<number> {
-  // Base transaction fee
-  const baseFee = 5000; // 0.000005 SOL
+  // Base transaction fee (2 signatures: init + verify)
+  const baseFee = 10000; // 0.00001 SOL
 
-  // Rent for nullifier account (estimated)
-  // Account size: 8 (discriminator) + 32 (nullifier) + 8 (verified_at) + 1 (is_used)
-  const nullifierAccountSize = 8 + 32 + 8 + 1;
+  // Rent for nullifier account
+  // Account size: 8 (discriminator) + 32 (nullifier) + 1 (is_used) + 8 (used_at) + 1 (proof_type) + 1 (bump)
+  const nullifierAccountSize = 8 + 32 + 1 + 8 + 1 + 1;
   const nullifierRent = await connection.getMinimumBalanceForRentExemption(nullifierAccountSize);
 
   // Total estimated cost
   return baseFee + nullifierRent;
+}
+
+/**
+ * Check if the program is deployed on the network
+ */
+export async function isProgramDeployed(connection: Connection): Promise<boolean> {
+  try {
+    const programId = getVerifierProgram();
+    const accountInfo = await connection.getAccountInfo(programId);
+    return accountInfo !== null && accountInfo.executable;
+  } catch {
+    return false;
+  }
 }

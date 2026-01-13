@@ -1,0 +1,297 @@
+{
+  "version": "0.1.0",
+  "name": "vouch_verifier",
+  "instructions": [
+    {
+      "name": "createCommitment",
+      "accounts": [
+        {
+          "name": "commitmentAccount",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "owner",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "commitment",
+          "type": {
+            "array": ["u8", 32]
+          }
+        }
+      ]
+    },
+    {
+      "name": "initNullifier",
+      "accounts": [
+        {
+          "name": "nullifierAccount",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "payer",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "nullifier",
+          "type": {
+            "array": ["u8", 32]
+          }
+        }
+      ]
+    },
+    {
+      "name": "verifyDevReputation",
+      "accounts": [
+        {
+          "name": "nullifierAccount",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "recipient",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "payer",
+          "isMut": true,
+          "isSigner": true
+        }
+      ],
+      "args": [
+        {
+          "name": "proof",
+          "type": "bytes"
+        },
+        {
+          "name": "publicInputs",
+          "type": "bytes"
+        },
+        {
+          "name": "minTvl",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "verifyWhaleTrading",
+      "accounts": [
+        {
+          "name": "nullifierAccount",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "recipient",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "payer",
+          "isMut": true,
+          "isSigner": true
+        }
+      ],
+      "args": [
+        {
+          "name": "proof",
+          "type": "bytes"
+        },
+        {
+          "name": "publicInputs",
+          "type": "bytes"
+        },
+        {
+          "name": "minVolume",
+          "type": "u64"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "CommitmentAccount",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "commitment",
+            "type": {
+              "array": ["u8", 32]
+            }
+          },
+          {
+            "name": "owner",
+            "type": "publicKey"
+          },
+          {
+            "name": "createdAt",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "NullifierAccount",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "nullifier",
+            "type": {
+              "array": ["u8", 32]
+            }
+          },
+          {
+            "name": "isUsed",
+            "type": "bool"
+          },
+          {
+            "name": "usedAt",
+            "type": "i64"
+          },
+          {
+            "name": "proofType",
+            "type": {
+              "defined": "ProofType"
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "ProofType",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Unset"
+          },
+          {
+            "name": "DeveloperReputation"
+          },
+          {
+            "name": "WhaleTrading"
+          }
+        ]
+      }
+    }
+  ],
+  "events": [
+    {
+      "name": "CommitmentCreated",
+      "fields": [
+        {
+          "name": "owner",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "commitment",
+          "type": {
+            "array": ["u8", 32]
+          },
+          "index": false
+        },
+        {
+          "name": "timestamp",
+          "type": "i64",
+          "index": false
+        }
+      ]
+    },
+    {
+      "name": "ProofVerified",
+      "fields": [
+        {
+          "name": "nullifier",
+          "type": {
+            "array": ["u8", 32]
+          },
+          "index": false
+        },
+        {
+          "name": "proofType",
+          "type": {
+            "defined": "ProofType"
+          },
+          "index": false
+        },
+        {
+          "name": "minThreshold",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "recipient",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "timestamp",
+          "type": "i64",
+          "index": false
+        }
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidProof",
+      "msg": "Invalid proof"
+    },
+    {
+      "code": 6001,
+      "name": "InvalidPublicInputs",
+      "msg": "Invalid public inputs"
+    },
+    {
+      "code": 6002,
+      "name": "NullifierAlreadyUsed",
+      "msg": "Nullifier has already been used"
+    },
+    {
+      "code": 6003,
+      "name": "CommitmentNotFound",
+      "msg": "Commitment not found"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidCommitment",
+      "msg": "Invalid commitment"
+    }
+  ],
+  "metadata": {
+    "address": "FGoZca8WMS9EK6TSgDf2cFdGH3uiwH3ThFKfE5KdjGAg"
+  }
+}

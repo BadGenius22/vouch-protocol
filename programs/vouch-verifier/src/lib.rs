@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-declare_id!("VouchXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX");
+declare_id!("FGoZca8WMS9EK6TSgDf2cFdGH3uiwH3ThFKfE5KdjGAg");
 
 /// Vouch Protocol - ZK Proof Verifier
 ///
