@@ -19,6 +19,15 @@ import { Connection, PublicKey, Transaction } from '@solana/web3.js';
 import type { ProofResult, VerificationResult, ProofType } from './types';
 import { VouchError, VouchErrorCode } from './types';
 
+// === Debug Mode ===
+const DEBUG = process.env.NODE_ENV === 'development';
+
+function debugLog(...args: unknown[]): void {
+  if (DEBUG) {
+    console.log('[Vouch]', ...args);
+  }
+}
+
 // === Validation Helpers ===
 
 /** Regex for valid hex strings (64 chars = 32 bytes) */
@@ -50,7 +59,7 @@ function getVerifierProgramId(): PublicKey {
   try {
     return new PublicKey(programId);
   } catch {
-    console.warn('[Vouch] Invalid program ID, using default');
+    if (DEBUG) console.warn('[Vouch] Invalid program ID, using default');
     return new PublicKey(DEFAULT_PROGRAM_ID);
   }
 }
@@ -155,7 +164,7 @@ export async function isNullifierUsed(
     if (error instanceof VouchError) {
       throw error;
     }
-    console.error('[Vouch] Error checking nullifier status:', error);
+    if (DEBUG) console.error('[Vouch] Error checking nullifier status:', error);
     return false;
   }
 }
@@ -181,7 +190,7 @@ export async function isCommitmentRegistered(
     if (error instanceof VouchError) {
       throw error;
     }
-    console.error('[Vouch] Error checking commitment status:', error);
+    if (DEBUG) console.error('[Vouch] Error checking commitment status:', error);
     return false;
   }
 }
@@ -292,7 +301,7 @@ export async function submitProofToChain(
   signTransaction: (tx: Transaction) => Promise<Transaction>
 ): Promise<VerificationResult> {
   try {
-    console.log('[Vouch] Starting proof submission...');
+    debugLog('Starting proof submission...');
 
     // Perform pre-verification checks
     const checks = await preVerificationChecks(connection, proof, payer);
@@ -310,7 +319,7 @@ export async function submitProofToChain(
     const [nullifierPda] = deriveNullifierPDA(proof.nullifier);
     const [commitmentPda] = deriveCommitmentPDA(proof.commitment);
 
-    console.log('[Vouch] PDAs derived:', {
+    debugLog('PDAs derived:', {
       program: getVerifierProgram().toBase58(),
       nullifierPda: nullifierPda.toBase58(),
       commitmentPda: commitmentPda.toBase58(),
@@ -351,14 +360,14 @@ export async function submitProofToChain(
     // await connection.confirmTransaction(signature);
 
     // Placeholder response for development
-    console.log('[Vouch] Proof submission completed (mock)');
+    debugLog('Proof submission completed (mock)');
 
     return {
       success: true,
       signature: 'mock_signature_' + Date.now().toString(36),
     };
   } catch (error) {
-    console.error('[Vouch] Proof submission failed:', error);
+    if (DEBUG) console.error('[Vouch] Proof submission failed:', error);
 
     return {
       success: false,

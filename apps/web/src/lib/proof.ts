@@ -17,6 +17,7 @@
  */
 
 import { blake2s } from 'blakejs';
+import { PublicKey } from '@solana/web3.js';
 import type { InputMap } from '@noir-lang/noirc_abi';
 import { loadCircuit } from './circuit';
 import {
@@ -29,6 +30,9 @@ import {
   VouchError,
   VouchErrorCode,
 } from './types';
+
+// === Debug Mode ===
+const DEBUG = process.env.NODE_ENV === 'development';
 
 // === Constants ===
 
@@ -73,14 +77,14 @@ function bytesToNumberArray(bytes: Uint8Array): number[] {
 }
 
 /**
- * Convert a Solana wallet address (base58) to a 32-byte array
+ * Convert a Solana wallet address (base58) to raw 32-byte public key
  *
- * Security Note: We hash the address to get a consistent 32-byte value.
- * This is intentional - the circuit proves knowledge of a preimage that
- * hashes to the commitment, not the raw wallet address.
+ * CRITICAL: This function returns the RAW 32-byte public key, NOT a hash.
+ * The circuit expects the actual public key bytes for commitment/nullifier
+ * derivation. Using a hash would break the proof verification.
  *
  * @param walletPubkey - Base58 encoded Solana wallet address
- * @returns 32-byte hash of the wallet address
+ * @returns Raw 32-byte public key
  * @throws VouchError if wallet address is invalid
  */
 function walletToBytes32(walletPubkey: string): Uint8Array {
@@ -101,12 +105,16 @@ function walletToBytes32(walletPubkey: string): Uint8Array {
     );
   }
 
-  const encoder = new TextEncoder();
-  const walletBytes = encoder.encode(walletPubkey);
-
-  // Use blake2s to hash the wallet address to 32 bytes
-  // This ensures consistent input size for the circuit
-  return blake2s(walletBytes, undefined, 32);
+  try {
+    // Decode base58 to raw 32-byte public key using @solana/web3.js
+    const pubkey = new PublicKey(walletPubkey);
+    return pubkey.toBytes();
+  } catch {
+    throw new VouchError(
+      'Invalid wallet address: failed to decode base58',
+      VouchErrorCode.INSUFFICIENT_DATA
+    );
+  }
 }
 
 /**
@@ -371,6 +379,15 @@ function formatNumber(num: number): string {
 }
 
 /**
+ * Debug logger - only logs in development mode
+ */
+function debugLog(...args: unknown[]): void {
+  if (DEBUG) {
+    console.log('[Vouch]', ...args);
+  }
+}
+
+/**
  * Create a progress update helper function
  *
  * @param onProgress - Optional callback for progress updates
@@ -386,7 +403,7 @@ function createProgressUpdater(onProgress?: ProofProgressCallback) {
     if (onProgress) {
       onProgress({ status, progress, message, error });
     }
-    console.log(`[Vouch] ${message}`);
+    debugLog(message);
   };
 }
 
@@ -428,7 +445,7 @@ export async function generateDevReputationProof(
     validateDevReputationInput(input);
 
     const totalTvl = input.programs.reduce((s, p) => s + p.estimatedTVL, 0);
-    console.log('[Vouch] Generating dev reputation proof:', {
+    debugLog('Generating dev reputation proof:', {
       wallet: input.walletPubkey.slice(0, 8) + '...',
       programs: input.programs.length,
       totalTvl: formatNumber(totalTvl),
@@ -495,7 +512,7 @@ export async function generateDevReputationProof(
       throw error;
     }
 
-    console.error('[Vouch] Proof generation error:', error);
+    if (DEBUG) console.error('[Vouch] Proof generation error:', error);
     updateProgress('error', 0, 'Proof generation failed', errorMessage);
 
     throw new VouchError(
@@ -541,7 +558,7 @@ export async function generateWhaleTradingProof(
     updateProgress('preparing', 5, 'Validating input data...');
     validateWhaleTradingInput(input);
 
-    console.log('[Vouch] Generating whale trading proof:', {
+    debugLog('Generating whale trading proof:', {
       wallet: input.walletPubkey.slice(0, 8) + '...',
       volume: formatNumber(input.tradingData.totalVolume),
       trades: input.tradingData.tradeCount,
@@ -621,7 +638,7 @@ export async function generateWhaleTradingProof(
       throw error;
     }
 
-    console.error('[Vouch] Proof generation error:', error);
+    if (DEBUG) console.error('[Vouch] Proof generation error:', error);
     updateProgress('error', 0, 'Proof generation failed', errorMessage);
 
     throw new VouchError(
@@ -652,13 +669,13 @@ export async function verifyProofLocally(
   publicInputs: string[]
 ): Promise<boolean> {
   try {
-    console.log(`[Vouch] Verifying ${circuitType} proof locally...`);
+    debugLog(`Verifying ${circuitType} proof locally...`);
     const { backend } = await loadCircuit(circuitType);
     const isValid = await backend.verifyProof({ proof, publicInputs });
-    console.log(`[Vouch] Local verification result: ${isValid ? 'VALID' : 'INVALID'}`);
+    debugLog(`Local verification result: ${isValid ? 'VALID' : 'INVALID'}`);
     return isValid;
   } catch (error) {
-    console.error('[Vouch] Local verification failed:', error);
+    if (DEBUG) console.error('[Vouch] Local verification failed:', error);
     return false;
   }
 }

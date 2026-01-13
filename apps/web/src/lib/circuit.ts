@@ -17,6 +17,25 @@ import { UltraHonkBackend } from '@aztec/bb.js';
 import type { CompiledCircuit } from '@noir-lang/types';
 import { CircuitType, VouchError, VouchErrorCode } from './types';
 
+// === Debug Mode ===
+const DEBUG = process.env.NODE_ENV === 'development';
+
+function debugLog(...args: unknown[]): void {
+  if (DEBUG) {
+    console.log('[Vouch]', ...args);
+  }
+}
+
+// === Constants ===
+
+// Cache TTL in milliseconds (1 hour)
+// Balances memory usage vs initialization cost
+const CACHE_TTL = 60 * 60 * 1000;
+
+// WASM initialization timeout (30 seconds)
+// Prevents hanging indefinitely if WASM fails to load
+const WASM_INIT_TIMEOUT = 30 * 1000;
+
 // === Circuit Cache ===
 // Cache loaded circuits to avoid reloading on every proof generation
 // This is critical for performance as WASM initialization is expensive
@@ -30,12 +49,36 @@ interface CachedCircuit {
 
 const circuitCache = new Map<CircuitType, CachedCircuit>();
 
-// Cache TTL in milliseconds (1 hour)
-// Balances memory usage vs initialization cost
-const CACHE_TTL = 60 * 60 * 1000;
-
 // Track if we're currently loading to prevent race conditions
 const loadingPromises = new Map<CircuitType, Promise<{ noir: Noir; backend: UltraHonkBackend }>>();
+
+// === Utilities ===
+
+/**
+ * Wrap a promise with a timeout
+ * @param promise - The promise to wrap
+ * @param timeoutMs - Timeout in milliseconds
+ * @param errorMessage - Error message if timeout occurs
+ */
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  errorMessage: string
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout>;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new VouchError(errorMessage, VouchErrorCode.CIRCUIT_LOAD_FAILED));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    clearTimeout(timeoutId!);
+  }
+}
 
 // === Public API ===
 
@@ -53,19 +96,23 @@ export async function loadCircuit(circuitType: CircuitType): Promise<{
   // Check cache first
   const cached = circuitCache.get(circuitType);
   if (cached && Date.now() - cached.loadedAt < CACHE_TTL) {
-    console.log(`[Vouch] Using cached ${circuitType} circuit`);
+    debugLog(`Using cached ${circuitType} circuit`);
     return { noir: cached.noir, backend: cached.backend };
   }
 
   // Check if we're already loading this circuit (prevents race conditions)
   const existingPromise = loadingPromises.get(circuitType);
   if (existingPromise) {
-    console.log(`[Vouch] Waiting for existing ${circuitType} load...`);
+    debugLog(`Waiting for existing ${circuitType} load...`);
     return existingPromise;
   }
 
-  // Create loading promise for deduplication
-  const loadPromise = doLoadCircuit(circuitType);
+  // Create loading promise for deduplication with timeout
+  const loadPromise = withTimeout(
+    doLoadCircuit(circuitType),
+    WASM_INIT_TIMEOUT,
+    `WASM initialization timed out after ${WASM_INIT_TIMEOUT / 1000}s`
+  );
   loadingPromises.set(circuitType, loadPromise);
 
   try {
@@ -82,7 +129,7 @@ async function doLoadCircuit(circuitType: CircuitType): Promise<{
   noir: Noir;
   backend: UltraHonkBackend;
 }> {
-  console.log(`[Vouch] Loading ${circuitType} circuit...`);
+  debugLog(` Loading ${circuitType} circuit...`);
 
   try {
     // Fetch compiled circuit from public directory
@@ -106,7 +153,7 @@ async function doLoadCircuit(circuitType: CircuitType): Promise<{
       );
     }
 
-    console.log(`[Vouch] Initializing UltraHonk backend...`);
+    debugLog(` Initializing UltraHonk backend...`);
 
     // Initialize UltraHonk backend from @aztec/bb.js (this loads WASM)
     // Uses SharedArrayBuffer for multithreading if COOP/COEP headers are set
@@ -134,7 +181,7 @@ async function doLoadCircuit(circuitType: CircuitType): Promise<{
       loadedAt: Date.now(),
     });
 
-    console.log(`[Vouch] ${circuitType} circuit loaded successfully`);
+    debugLog(` ${circuitType} circuit loaded successfully`);
     return { noir, backend };
   } catch (error) {
     // Re-throw VouchError as-is
@@ -156,7 +203,7 @@ async function doLoadCircuit(circuitType: CircuitType): Promise<{
  * Call this early in the app lifecycle for better UX
  */
 export async function preloadCircuits(): Promise<void> {
-  console.log('[Vouch] Preloading circuits...');
+  debugLog('Preloading circuits...');
 
   const circuits: CircuitType[] = ['dev_reputation', 'whale_trading'];
 
@@ -165,13 +212,13 @@ export async function preloadCircuits(): Promise<void> {
       try {
         await loadCircuit(circuitType);
       } catch (error) {
-        console.warn(`[Vouch] Failed to preload ${circuitType}:`, error);
+        if (DEBUG) console.warn(`[Vouch] Failed to preload ${circuitType}:`, error);
         // Don't throw - preloading is best-effort
       }
     })
   );
 
-  console.log('[Vouch] Circuits preloaded');
+  debugLog('Circuits preloaded');
 }
 
 /**
@@ -189,7 +236,7 @@ export async function clearCircuitCache(): Promise<void> {
     }
   }
   circuitCache.clear();
-  console.log('[Vouch] Circuit cache cleared');
+  debugLog('Circuit cache cleared');
 }
 
 /**
