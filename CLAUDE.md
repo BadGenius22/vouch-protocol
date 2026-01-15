@@ -6,6 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Vouch Protocol is a zero-knowledge proof-based anonymous reputation protocol for Solana. It enables developers and traders to prove on-chain credentials without revealing their wallet address or identity.
 
+## Required Skills
+
+Always use these skills when working on this repository:
+
+- **`/solana-dev`** - Solana development patterns, Anchor best practices, and framework-kit guidance
+- **`/vercel-react-best-practices`** - React and Next.js performance optimization patterns
+- **`/web-design-guidelines`** - UI code review for accessibility and design best practices
+
 ## Tech Stack
 
 - **Blockchain:** Solana (Anchor 0.29+)
