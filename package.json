@@ -6,8 +6,12 @@
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "dev": "pnpm --filter @vouch/web dev",
+    "dev:verifier": "pnpm --filter @vouch/verifier dev",
+    "dev:all": "concurrently \"pnpm dev\" \"pnpm dev:verifier\"",
     "build": "pnpm --filter @vouch/web build",
+    "build:verifier": "pnpm --filter @vouch/verifier build",
     "start": "pnpm --filter @vouch/web start",
+    "start:verifier": "pnpm --filter @vouch/verifier start",
     "lint": "pnpm --filter @vouch/web lint",
     "typecheck": "tsc --noEmit",
     "circuits:compile": "cd circuits && nargo compile --workspace",
@@ -17,6 +21,9 @@
     "anchor:test": "anchor test",
     "anchor:deploy": "anchor deploy --provider.cluster devnet",
     "anchor:idl": "anchor idl init --filepath target/idl/vouch_verifier.json",
+    "test:verifier": "tsx scripts/test-verifier-api.ts",
+    "setup:verifier": "tsx scripts/setup-verifier.ts",
+    "setup:local": "bash scripts/local-test.sh",
     "clean": "rm -rf node_modules apps/web/node_modules apps/web/.next target circuits/*/target"
   },
   "devDependencies": {
@@ -25,9 +32,11 @@
     "@types/mocha": "^10.0.6",
     "@types/node": "^20.10.0",
     "chai": "^4.3.10",
+    "concurrently": "^8.2.2",
     "mocha": "^10.2.0",
     "prettier": "^3.2.0",
     "ts-mocha": "^10.0.0",
+    "tsx": "^4.21.0",
     "turbo": "^2.0.0",
     "typescript": "^5.3.0"
   },

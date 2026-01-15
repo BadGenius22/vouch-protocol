@@ -25,6 +25,10 @@ import type {
 import { generateDevReputationProof, generateWhaleTradingProof } from './proof';
 import { submitProofToChain } from './verify';
 import {
+  isVerifierAvailable,
+  submitProofWithVerifier,
+} from './verifier-client';
+import {
   shieldForProof,
   withdrawPrivately,
   isPrivacyCashAvailable,
@@ -67,6 +71,8 @@ export interface ProveFlowOptions {
   shieldAmount?: number;
   /** Skip Privacy Cash even if available (not recommended) */
   skipPrivacyCash?: boolean;
+  /** Use verifier service for production-grade verification (recommended) */
+  useVerifierService?: boolean;
   /** Progress callback */
   onProgress?: ProveFlowProgressCallback;
 }
@@ -86,6 +92,8 @@ export interface ProveFlowResult {
   withdrawTx?: string;
   /** Whether Privacy Cash was used */
   privacyCashUsed: boolean;
+  /** Whether verifier service was used */
+  verifierServiceUsed: boolean;
   /** Error message if failed */
   error?: string;
   /** Stage where error occurred */
@@ -153,12 +161,14 @@ async function executeProveFlow<T>(
     recipient,
     shieldAmount = DEFAULT_SHIELD_AMOUNT,
     skipPrivacyCash = false,
+    useVerifierService = true, // Default to using verifier service
     onProgress,
   } = options;
 
   let shieldTx: string | undefined;
   let withdrawTx: string | undefined;
   let privacyCashUsed = false;
+  let verifierServiceUsed = false;
 
   try {
     // Validate wallet
@@ -200,17 +210,38 @@ async function executeProveFlow<T>(
 
     reportProgress(onProgress, 'generating-proof', 'Proof generated successfully', 50);
 
-    // Step 3: Submit to chain
+    // Step 3: Submit to chain (use verifier service if available and enabled)
     reportProgress(onProgress, 'submitting', 'Submitting proof to Solana...', 60);
 
-    const verification = await submitProofToChain(
-      connection,
-      proof,
-      proofType,
-      wallet.publicKey,
-      wallet.signTransaction.bind(wallet) as (tx: Transaction) => Promise<Transaction>,
-      recipientPubkey
-    );
+    let verification: VerificationResult;
+
+    // Check if verifier service should be used
+    const shouldUseVerifier = useVerifierService && await isVerifierAvailable();
+
+    if (shouldUseVerifier) {
+      console.log('[ProveFlow] Using verifier service for production verification');
+      reportProgress(onProgress, 'submitting', 'Verifying with secure verifier service...', 65);
+
+      verification = await submitProofWithVerifier(
+        connection,
+        proof,
+        proofType,
+        wallet.publicKey,
+        wallet.signTransaction.bind(wallet) as (tx: Transaction) => Promise<Transaction>,
+        recipientPubkey
+      );
+      verifierServiceUsed = true;
+    } else {
+      console.log('[ProveFlow] Using direct on-chain verification (development mode)');
+      verification = await submitProofToChain(
+        connection,
+        proof,
+        proofType,
+        wallet.publicKey,
+        wallet.signTransaction.bind(wallet) as (tx: Transaction) => Promise<Transaction>,
+        recipientPubkey
+      );
+    }
 
     if (!verification.success) {
       return {
@@ -219,6 +250,7 @@ async function executeProveFlow<T>(
         verification,
         shieldTx,
         privacyCashUsed,
+        verifierServiceUsed,
         error: verification.error || 'Verification failed',
         errorStage: 'submitting',
       };
@@ -250,6 +282,7 @@ async function executeProveFlow<T>(
       shieldTx,
       withdrawTx,
       privacyCashUsed,
+      verifierServiceUsed,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -260,6 +293,7 @@ async function executeProveFlow<T>(
       shieldTx,
       withdrawTx,
       privacyCashUsed,
+      verifierServiceUsed,
       error: errorMessage,
       errorStage: 'generating-proof',
     };
@@ -272,6 +306,14 @@ async function executeProveFlow<T>(
  */
 export async function isEnhancedPrivacyAvailable(): Promise<boolean> {
   return isPrivacyCashAvailable();
+}
+
+/**
+ * Check if production verification (verifier service) is available
+ * Returns true if the ZK verifier service is running and healthy
+ */
+export async function isProductionVerificationAvailable(): Promise<boolean> {
+  return isVerifierAvailable();
 }
 
 /**

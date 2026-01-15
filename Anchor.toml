@@ -6,10 +6,10 @@ seeds = false
 skip-lint = false
 
 [programs.localnet]
-vouch_verifier = "FGoZca8WMS9EK6TSgDf2cFdGH3uiwH3ThFKfE5KdjGAg"
+vouch_verifier = "CwWhTbquAFY5dvEMctwWHddWvdsDVAxWmtGPUt6s6UxQ"
 
 [programs.devnet]
-vouch_verifier = "FGoZca8WMS9EK6TSgDf2cFdGH3uiwH3ThFKfE5KdjGAg"
+vouch_verifier = "CwWhTbquAFY5dvEMctwWHddWvdsDVAxWmtGPUt6s6UxQ"
 
 [registry]
 url = "https://api.apr.dev"

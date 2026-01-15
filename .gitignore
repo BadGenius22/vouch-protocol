@@ -4,6 +4,7 @@ node_modules/
 # Build outputs
 apps/web/.next/
 apps/web/out/
+dist/
 target/
 
 # Environment
