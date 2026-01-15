@@ -43,6 +43,7 @@ const nextConfig = {
         tls: false,
         path: false,
         crypto: false,
+        'pino-pretty': false,
       };
     }
 
