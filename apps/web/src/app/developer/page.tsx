@@ -1,47 +1,109 @@
 'use client';
 
-import { useState } from 'react';
+import { useReducer, useCallback } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { WalletButton } from '@/components/wallet/wallet-button';
+import { WasmErrorBoundary } from '@/components/error-boundary';
 import { getDeployedPrograms } from '@/app/actions/helius';
 import type { ProgramData, ProofResult, VerificationResult } from '@/lib/types';
 import { Loader2, CheckCircle, XCircle, ExternalLink } from 'lucide-react';
 
+// === State Types ===
+
 type Step = 'connect' | 'fetch' | 'generate' | 'verify' | 'complete';
 
-export default function DeveloperPage() {
+interface DeveloperState {
+  step: Step;
+  loading: boolean;
+  error: string | null;
+  programs: ProgramData[];
+  proofResult: ProofResult | null;
+  verificationResult: VerificationResult | null;
+}
+
+// === Action Types ===
+
+type DeveloperAction =
+  | { type: 'START_LOADING' }
+  | { type: 'SET_ERROR'; error: string }
+  | { type: 'CLEAR_ERROR' }
+  | { type: 'SET_PROGRAMS'; programs: ProgramData[] }
+  | { type: 'SET_PROOF_RESULT'; proofResult: ProofResult }
+  | { type: 'SET_VERIFICATION_RESULT'; verificationResult: VerificationResult }
+  | { type: 'SET_STEP'; step: Step }
+  | { type: 'RESET' };
+
+// === Reducer ===
+
+const initialState: DeveloperState = {
+  step: 'connect',
+  loading: false,
+  error: null,
+  programs: [],
+  proofResult: null,
+  verificationResult: null,
+};
+
+function developerReducer(state: DeveloperState, action: DeveloperAction): DeveloperState {
+  switch (action.type) {
+    case 'START_LOADING':
+      return { ...state, loading: true, error: null };
+    case 'SET_ERROR':
+      return { ...state, loading: false, error: action.error };
+    case 'CLEAR_ERROR':
+      return { ...state, error: null };
+    case 'SET_PROGRAMS':
+      return { ...state, loading: false, programs: action.programs, step: 'generate' };
+    case 'SET_PROOF_RESULT':
+      return { ...state, loading: false, proofResult: action.proofResult, step: 'verify' };
+    case 'SET_VERIFICATION_RESULT':
+      return {
+        ...state,
+        loading: false,
+        verificationResult: action.verificationResult,
+        step: action.verificationResult.success ? 'complete' : state.step,
+      };
+    case 'SET_STEP':
+      return { ...state, step: action.step };
+    case 'RESET':
+      return initialState;
+    default:
+      return state;
+  }
+}
+
+// === Component ===
+
+function DeveloperPageContent() {
   const { connected, publicKey, signTransaction } = useWallet();
   const { connection } = useConnection();
-  const [step, setStep] = useState<Step>('connect');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [programs, setPrograms] = useState<ProgramData[]>([]);
-  const [proofResult, setProofResult] = useState<ProofResult | null>(null);
-  const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null);
+  const [state, dispatch] = useReducer(developerReducer, initialState);
 
-  const handleFetchData = async () => {
+  const { step, loading, error, programs, proofResult, verificationResult } = state;
+
+  const handleFetchData = useCallback(async () => {
     if (!publicKey) return;
-    setLoading(true);
-    setError(null);
+    dispatch({ type: 'START_LOADING' });
 
     try {
       const result = await getDeployedPrograms(publicKey.toBase58());
-      if (!result.success || !result.data) throw new Error(result.error);
-      setPrograms(result.data);
-      setStep('generate');
+      if (!result.success || !result.data) {
+        throw new Error(result.error || 'Failed to fetch programs');
+      }
+      dispatch({ type: 'SET_PROGRAMS', programs: result.data });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch data');
-    } finally {
-      setLoading(false);
+      dispatch({
+        type: 'SET_ERROR',
+        error: err instanceof Error ? err.message : 'Failed to fetch data',
+      });
     }
-  };
+  }, [publicKey]);
 
-  const handleGenerateProof = async () => {
+  const handleGenerateProof = useCallback(async () => {
     if (!publicKey || programs.length === 0) return;
-    setLoading(true);
-    setError(null);
+    dispatch({ type: 'START_LOADING' });
 
     try {
       // Dynamic import to avoid SSR issues with WASM
@@ -51,19 +113,18 @@ export default function DeveloperPage() {
         programs,
         minTvl: 10000,
       });
-      setProofResult(result);
-      setStep('verify');
+      dispatch({ type: 'SET_PROOF_RESULT', proofResult: result });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to generate proof');
-    } finally {
-      setLoading(false);
+      dispatch({
+        type: 'SET_ERROR',
+        error: err instanceof Error ? err.message : 'Failed to generate proof',
+      });
     }
-  };
+  }, [publicKey, programs]);
 
-  const handleSubmitProof = async () => {
+  const handleSubmitProof = useCallback(async () => {
     if (!publicKey || !proofResult || !signTransaction) return;
-    setLoading(true);
-    setError(null);
+    dispatch({ type: 'START_LOADING' });
 
     try {
       // Dynamic import to avoid SSR issues
@@ -73,11 +134,13 @@ export default function DeveloperPage() {
       const deployed = await isProgramDeployed(connection);
       if (!deployed) {
         // For demo/hackathon: show success with mock signature
-        setVerificationResult({
-          success: true,
-          signature: 'demo_' + Date.now().toString(36),
+        dispatch({
+          type: 'SET_VERIFICATION_RESULT',
+          verificationResult: {
+            success: true,
+            signature: 'demo_' + Date.now().toString(36),
+          },
         });
-        setStep('complete');
         return;
       }
 
@@ -90,18 +153,24 @@ export default function DeveloperPage() {
         signTransaction
       );
 
-      setVerificationResult(result);
-      if (result.success) {
-        setStep('complete');
-      } else {
-        setError(result.error || 'Verification failed');
+      dispatch({ type: 'SET_VERIFICATION_RESULT', verificationResult: result });
+      if (!result.success) {
+        dispatch({
+          type: 'SET_ERROR',
+          error: result.error || 'Verification failed',
+        });
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to submit proof');
-    } finally {
-      setLoading(false);
+      dispatch({
+        type: 'SET_ERROR',
+        error: err instanceof Error ? err.message : 'Failed to submit proof',
+      });
     }
-  };
+  }, [publicKey, proofResult, signTransaction, connection]);
+
+  const handleReset = useCallback(() => {
+    dispatch({ type: 'RESET' });
+  }, []);
 
   const totalTVL = programs.reduce((sum, p) => sum + p.estimatedTVL, 0);
   const meetsThreshold = totalTVL >= 10000;
@@ -119,8 +188,12 @@ export default function DeveloperPage() {
       </p>
 
       {error && (
-        <div className="mb-6 p-4 bg-destructive/10 border border-destructive rounded-lg flex items-center gap-2">
-          <XCircle className="w-5 h-5 text-destructive" />
+        <div
+          className="mb-6 p-4 bg-destructive/10 border border-destructive rounded-lg flex items-center gap-2"
+          role="alert"
+          aria-live="assertive"
+        >
+          <XCircle className="w-5 h-5 text-destructive" aria-hidden="true" />
           <span className="text-destructive">{error}</span>
         </div>
       )}
@@ -154,8 +227,16 @@ export default function DeveloperPage() {
                     <p className="text-sm text-muted-foreground">Connected</p>
                     <p className="font-mono text-sm break-all">{publicKey?.toBase58()}</p>
                   </div>
-                  <Button onClick={handleFetchData} className="w-full" disabled={loading}>
-                    {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                  <Button
+                    onClick={handleFetchData}
+                    className="w-full"
+                    disabled={loading}
+                    aria-busy={loading}
+                    aria-label={loading ? 'Fetching programs...' : 'Fetch my programs'}
+                  >
+                    {loading && (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" aria-hidden="true" />
+                    )}
                     Fetch My Programs
                   </Button>
                 </div>
@@ -167,12 +248,14 @@ export default function DeveloperPage() {
             <div className="space-y-4">
               <div className="p-4 bg-muted rounded-lg">
                 <h3 className="font-semibold mb-2">Your Programs</h3>
-                {programs.map((p, i) => (
-                  <div key={i} className="flex justify-between text-sm py-1">
-                    <span className="font-mono">{p.address.slice(0, 12)}...</span>
-                    <span className="text-green-600">${p.estimatedTVL.toLocaleString()}</span>
-                  </div>
-                ))}
+                <ul aria-label="List of deployed programs">
+                  {programs.map((p, i) => (
+                    <li key={i} className="flex justify-between text-sm py-1">
+                      <span className="font-mono">{p.address.slice(0, 12)}...</span>
+                      <span className="text-green-600">${p.estimatedTVL.toLocaleString()}</span>
+                    </li>
+                  ))}
+                </ul>
                 <div className="mt-2 pt-2 border-t flex justify-between font-semibold">
                   <span>Total TVL</span>
                   <span className={meetsThreshold ? 'text-green-600' : 'text-red-600'}>
@@ -182,12 +265,22 @@ export default function DeveloperPage() {
               </div>
 
               {meetsThreshold ? (
-                <Button onClick={handleGenerateProof} className="w-full" disabled={loading}>
-                  {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                <Button
+                  onClick={handleGenerateProof}
+                  className="w-full"
+                  disabled={loading}
+                  aria-busy={loading}
+                  aria-label={loading ? 'Generating proof...' : 'Generate ZK proof'}
+                >
+                  {loading && (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" aria-hidden="true" />
+                  )}
                   Generate ZK Proof
                 </Button>
               ) : (
-                <p className="text-center text-destructive">Below $10K threshold</p>
+                <p className="text-center text-destructive" role="status">
+                  Below $10K threshold
+                </p>
               )}
               <p className="text-xs text-center text-muted-foreground">
                 Proof generated in your browser. Data never leaves your device.
@@ -197,9 +290,13 @@ export default function DeveloperPage() {
 
           {step === 'verify' && proofResult && (
             <div className="space-y-4">
-              <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+              <div
+                className="p-4 bg-green-50 border border-green-200 rounded-lg"
+                role="status"
+                aria-live="polite"
+              >
                 <div className="flex items-center gap-2 mb-2">
-                  <CheckCircle className="w-5 h-5 text-green-600" />
+                  <CheckCircle className="w-5 h-5 text-green-600" aria-hidden="true" />
                   <span className="font-semibold text-green-800">Proof Generated!</span>
                 </div>
                 <p className="text-sm text-green-700">
@@ -213,11 +310,21 @@ export default function DeveloperPage() {
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Nullifier</p>
-                  <p className="font-mono text-xs break-all">{proofResult.nullifier.slice(0, 32)}...</p>
+                  <p className="font-mono text-xs break-all">
+                    {proofResult.nullifier.slice(0, 32)}...
+                  </p>
                 </div>
               </div>
-              <Button onClick={handleSubmitProof} className="w-full" disabled={loading}>
-                {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+              <Button
+                onClick={handleSubmitProof}
+                className="w-full"
+                disabled={loading}
+                aria-busy={loading}
+                aria-label={loading ? 'Submitting proof...' : 'Submit proof to verifier'}
+              >
+                {loading && (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" aria-hidden="true" />
+                )}
                 Submit to Verifier
               </Button>
               <p className="text-xs text-center text-muted-foreground">
@@ -228,9 +335,13 @@ export default function DeveloperPage() {
 
           {step === 'complete' && verificationResult && (
             <div className="space-y-4">
-              <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+              <div
+                className="p-4 bg-green-50 border border-green-200 rounded-lg"
+                role="status"
+                aria-live="polite"
+              >
                 <div className="flex items-center gap-2 mb-2">
-                  <CheckCircle className="w-5 h-5 text-green-600" />
+                  <CheckCircle className="w-5 h-5 text-green-600" aria-hidden="true" />
                   <span className="font-semibold text-green-800">Verified On-Chain!</span>
                 </div>
                 <p className="text-sm text-green-700">
@@ -245,22 +356,18 @@ export default function DeveloperPage() {
                     target="_blank"
                     rel="noopener noreferrer"
                     className="font-mono text-xs break-all text-blue-600 hover:underline flex items-center gap-1"
+                    aria-label={`View transaction ${verificationResult.signature.slice(0, 16)}... on Solscan`}
                   >
                     {verificationResult.signature.slice(0, 32)}...
-                    <ExternalLink className="w-3 h-3" />
+                    <ExternalLink className="w-3 h-3" aria-hidden="true" />
                   </a>
                 </div>
               )}
               <Button
-                onClick={() => {
-                  setStep('connect');
-                  setPrograms([]);
-                  setProofResult(null);
-                  setVerificationResult(null);
-                  setError(null);
-                }}
+                onClick={handleReset}
                 variant="outline"
                 className="w-full"
+                aria-label="Start a new verification"
               >
                 Start New Verification
               </Button>
@@ -269,5 +376,20 @@ export default function DeveloperPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+/**
+ * Developer Reputation Proof Page
+ * Wrapped with WasmErrorBoundary to handle WASM/circuit loading failures gracefully
+ */
+export default function DeveloperPage() {
+  return (
+    <WasmErrorBoundary
+      title="Proof Generation Error"
+      description="The zero-knowledge proof engine failed to initialize. This may be due to browser compatibility issues."
+    >
+      <DeveloperPageContent />
+    </WasmErrorBoundary>
   );
 }

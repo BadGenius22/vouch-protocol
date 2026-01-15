@@ -21,11 +21,10 @@ import {
   Transaction,
   SystemProgram,
   TransactionInstruction,
+  ComputeBudgetProgram,
 } from '@solana/web3.js';
-import { Program, AnchorProvider, BN, Idl } from '@coral-xyz/anchor';
 import type { ProofResult, VerificationResult, ProofType } from './types';
 import { VouchError, VouchErrorCode } from './types';
-import IDL from './idl/vouch_verifier.json';
 
 // === Debug Mode ===
 const DEBUG = process.env.NODE_ENV === 'development';
@@ -56,6 +55,43 @@ const DEFAULT_PROGRAM_ID = 'FGoZca8WMS9EK6TSgDf2cFdGH3uiwH3ThFKfE5KdjGAg';
 /** PDA seeds */
 const NULLIFIER_SEED = 'nullifier';
 const COMMITMENT_SEED = 'commitment';
+
+/** Compute budget settings for ZK proof verification */
+const COMPUTE_UNIT_LIMIT = 400_000; // ZK verification is compute-intensive
+const COMPUTE_UNIT_PRICE = 1; // microLamports per CU (adjust for priority)
+
+// === Anchor Discriminator Computation ===
+
+/**
+ * Compute Anchor instruction discriminator using SHA-256
+ * Discriminator = first 8 bytes of sha256("global:<method_name>")
+ *
+ * This is the standard Anchor discriminator format.
+ * Computing dynamically ensures correctness even if method names change.
+ */
+async function computeDiscriminator(methodName: string): Promise<Uint8Array> {
+  const encoder = new TextEncoder();
+  const encoded = encoder.encode(`global:${methodName}`);
+
+  // Create a new ArrayBuffer copy to ensure proper typing for crypto.subtle
+  const data = new Uint8Array(encoded).buffer as ArrayBuffer;
+
+  // Use Web Crypto API (available in browsers and Node.js)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  return new Uint8Array(hashBuffer).slice(0, 8);
+}
+
+// Cache discriminators to avoid recomputing
+const discriminatorCache = new Map<string, Uint8Array>();
+
+async function getDiscriminator(methodName: string): Promise<Uint8Array> {
+  const cached = discriminatorCache.get(methodName);
+  if (cached) return cached;
+
+  const discriminator = await computeDiscriminator(methodName);
+  discriminatorCache.set(methodName, discriminator);
+  return discriminator;
+}
 
 // === Program ID Management ===
 
@@ -282,22 +318,38 @@ export async function preVerificationChecks(
 // === Instruction Builders ===
 
 /**
- * Build the init_nullifier instruction
+ * Build compute budget instructions for ZK verification
+ * These ensure the transaction has enough compute units and sets priority fee
  */
-export function buildInitNullifierInstruction(
+export function buildComputeBudgetInstructions(): TransactionInstruction[] {
+  return [
+    // Set compute unit limit (ZK verification needs more CUs)
+    ComputeBudgetProgram.setComputeUnitLimit({
+      units: COMPUTE_UNIT_LIMIT,
+    }),
+    // Set compute unit price (priority fee in microLamports)
+    ComputeBudgetProgram.setComputeUnitPrice({
+      microLamports: COMPUTE_UNIT_PRICE,
+    }),
+  ];
+}
+
+/**
+ * Build the init_nullifier instruction
+ * Uses dynamically computed Anchor discriminator for correctness
+ */
+export async function buildInitNullifierInstruction(
   nullifierBytes: Uint8Array,
   nullifierPda: PublicKey,
   payer: PublicKey
-): TransactionInstruction {
+): Promise<TransactionInstruction> {
   const programId = getVerifierProgram();
 
-  // Anchor discriminator for init_nullifier
-  const discriminator = Buffer.from([
-    0x9b, 0x3b, 0x85, 0x2a, 0x4c, 0x89, 0x0c, 0x84
-  ]);
+  // Compute Anchor discriminator: sha256("global:init_nullifier")[0..8]
+  const discriminator = await getDiscriminator('init_nullifier');
 
   // Instruction data: discriminator + nullifier (32 bytes)
-  const data = Buffer.concat([discriminator, Buffer.from(nullifierBytes)]);
+  const data = Buffer.concat([Buffer.from(discriminator), Buffer.from(nullifierBytes)]);
 
   return new TransactionInstruction({
     keys: [
@@ -312,21 +364,20 @@ export function buildInitNullifierInstruction(
 
 /**
  * Build the verify_dev_reputation instruction
+ * Uses dynamically computed Anchor discriminator for correctness
  */
-export function buildVerifyDevReputationInstruction(
+export async function buildVerifyDevReputationInstruction(
   proof: Uint8Array,
   publicInputs: Uint8Array,
   minTvl: bigint,
   nullifierPda: PublicKey,
   recipient: PublicKey,
   payer: PublicKey
-): TransactionInstruction {
+): Promise<TransactionInstruction> {
   const programId = getVerifierProgram();
 
-  // Anchor discriminator for verify_dev_reputation
-  const discriminator = Buffer.from([
-    0xf5, 0xa5, 0x6c, 0x2e, 0x9b, 0x3d, 0x1f, 0x8a
-  ]);
+  // Compute Anchor discriminator: sha256("global:verify_dev_reputation")[0..8]
+  const discriminator = await getDiscriminator('verify_dev_reputation');
 
   // Build instruction data
   // Format: discriminator + proof_len (4 bytes) + proof + public_inputs_len (4 bytes) + public_inputs + min_tvl (8 bytes)
@@ -340,7 +391,7 @@ export function buildVerifyDevReputationInstruction(
   minTvlBuf.writeBigUInt64LE(minTvl, 0);
 
   const data = Buffer.concat([
-    discriminator,
+    Buffer.from(discriminator),
     proofLen,
     Buffer.from(proof),
     publicInputsLen,
@@ -361,21 +412,20 @@ export function buildVerifyDevReputationInstruction(
 
 /**
  * Build the verify_whale_trading instruction
+ * Uses dynamically computed Anchor discriminator for correctness
  */
-export function buildVerifyWhaleTradingInstruction(
+export async function buildVerifyWhaleTradingInstruction(
   proof: Uint8Array,
   publicInputs: Uint8Array,
   minVolume: bigint,
   nullifierPda: PublicKey,
   recipient: PublicKey,
   payer: PublicKey
-): TransactionInstruction {
+): Promise<TransactionInstruction> {
   const programId = getVerifierProgram();
 
-  // Anchor discriminator for verify_whale_trading
-  const discriminator = Buffer.from([
-    0xa3, 0xc7, 0x5e, 0x1d, 0x8b, 0x2f, 0x4a, 0x9c
-  ]);
+  // Compute Anchor discriminator: sha256("global:verify_whale_trading")[0..8]
+  const discriminator = await getDiscriminator('verify_whale_trading');
 
   // Build instruction data (same format as dev reputation)
   const proofLen = Buffer.alloc(4);
@@ -388,7 +438,7 @@ export function buildVerifyWhaleTradingInstruction(
   minVolumeBuf.writeBigUInt64LE(minVolume, 0);
 
   const data = Buffer.concat([
-    discriminator,
+    Buffer.from(discriminator),
     proofLen,
     Buffer.from(proof),
     publicInputsLen,
@@ -470,8 +520,11 @@ export async function submitProofToChain(
     tx.recentBlockhash = blockhash;
     tx.feePayer = payer;
 
+    // Add compute budget instructions first (ZK verification is compute-intensive)
+    tx.add(...buildComputeBudgetInstructions());
+
     // Add init_nullifier instruction
-    const initNullifierIx = buildInitNullifierInstruction(
+    const initNullifierIx = await buildInitNullifierInstruction(
       nullifierBytes,
       nullifierPda,
       payer
@@ -489,7 +542,7 @@ export async function submitProofToChain(
     const recipientPubkey = recipient || payer;
 
     if (proofType === 'developer') {
-      const verifyIx = buildVerifyDevReputationInstruction(
+      const verifyIx = await buildVerifyDevReputationInstruction(
         proofBytes,
         publicInputsBytes,
         BigInt(MIN_TVL_THRESHOLD),
@@ -499,7 +552,7 @@ export async function submitProofToChain(
       );
       tx.add(verifyIx);
     } else {
-      const verifyIx = buildVerifyWhaleTradingInstruction(
+      const verifyIx = await buildVerifyWhaleTradingInstruction(
         proofBytes,
         publicInputsBytes,
         BigInt(MIN_VOLUME_THRESHOLD),
