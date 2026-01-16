@@ -270,3 +270,262 @@ fn test_zero_programs_fails() {
         nullifier
     );
 }
+
+// === Additional Edge Case Tests ===
+
+#[test]
+fn test_single_program_meets_threshold() {
+    let wallet_pubkey: [u8; 32] = [13; 32];
+    let secret: [u8; 32] = [14; 32];
+
+    let mut preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        preimage[i] = wallet_pubkey[i];
+        preimage[i + 32] = secret[i];
+    }
+    let commitment: [u8; 32] = blake2s(preimage);
+
+    let mut nullifier_preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        nullifier_preimage[i] = wallet_pubkey[i];
+    }
+    let domain: [u8; 9] = [118, 111, 117, 99, 104, 95, 100, 101, 118];
+    for i in 0..9 {
+        nullifier_preimage[32 + i] = domain[i];
+    }
+    let nullifier: [u8; 32] = blake2s(nullifier_preimage);
+
+    // Single program with 200K TVL
+    let tvl_amounts: [u64; MAX_PROGRAMS] = [200000, 0, 0, 0, 0];
+
+    main(
+        wallet_pubkey,
+        secret,
+        1,
+        tvl_amounts,
+        100000,  // 100K threshold
+        commitment,
+        nullifier
+    );
+}
+
+#[test]
+fn test_max_programs() {
+    let wallet_pubkey: [u8; 32] = [15; 32];
+    let secret: [u8; 32] = [16; 32];
+
+    let mut preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        preimage[i] = wallet_pubkey[i];
+        preimage[i + 32] = secret[i];
+    }
+    let commitment: [u8; 32] = blake2s(preimage);
+
+    let mut nullifier_preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        nullifier_preimage[i] = wallet_pubkey[i];
+    }
+    let domain: [u8; 9] = [118, 111, 117, 99, 104, 95, 100, 101, 118];
+    for i in 0..9 {
+        nullifier_preimage[32 + i] = domain[i];
+    }
+    let nullifier: [u8; 32] = blake2s(nullifier_preimage);
+
+    // All 5 programs with TVL (20K each = 100K total)
+    let tvl_amounts: [u64; MAX_PROGRAMS] = [20000, 20000, 20000, 20000, 20000];
+
+    main(
+        wallet_pubkey,
+        secret,
+        5,  // MAX_PROGRAMS
+        tvl_amounts,
+        100000,
+        commitment,
+        nullifier
+    );
+}
+
+#[test]
+fn test_zero_threshold() {
+    let wallet_pubkey: [u8; 32] = [17; 32];
+    let secret: [u8; 32] = [18; 32];
+
+    let mut preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        preimage[i] = wallet_pubkey[i];
+        preimage[i + 32] = secret[i];
+    }
+    let commitment: [u8; 32] = blake2s(preimage);
+
+    let mut nullifier_preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        nullifier_preimage[i] = wallet_pubkey[i];
+    }
+    let domain: [u8; 9] = [118, 111, 117, 99, 104, 95, 100, 101, 118];
+    for i in 0..9 {
+        nullifier_preimage[32 + i] = domain[i];
+    }
+    let nullifier: [u8; 32] = blake2s(nullifier_preimage);
+
+    // Even with 0 TVL, 0 threshold should pass
+    let tvl_amounts: [u64; MAX_PROGRAMS] = [0, 0, 0, 0, 0];
+
+    main(
+        wallet_pubkey,
+        secret,
+        1,
+        tvl_amounts,
+        0,  // Zero threshold
+        commitment,
+        nullifier
+    );
+}
+
+#[test(should_fail)]
+fn test_exceed_max_programs_fails() {
+    let wallet_pubkey: [u8; 32] = [19; 32];
+    let secret: [u8; 32] = [20; 32];
+
+    let mut preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        preimage[i] = wallet_pubkey[i];
+        preimage[i + 32] = secret[i];
+    }
+    let commitment: [u8; 32] = blake2s(preimage);
+
+    let mut nullifier_preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        nullifier_preimage[i] = wallet_pubkey[i];
+    }
+    let domain: [u8; 9] = [118, 111, 117, 99, 104, 95, 100, 101, 118];
+    for i in 0..9 {
+        nullifier_preimage[32 + i] = domain[i];
+    }
+    let nullifier: [u8; 32] = blake2s(nullifier_preimage);
+
+    let tvl_amounts: [u64; MAX_PROGRAMS] = [100000, 0, 0, 0, 0];
+
+    // program_count = 6 exceeds MAX_PROGRAMS (5) - should fail
+    main(
+        wallet_pubkey,
+        secret,
+        6,
+        tvl_amounts,
+        100000,
+        commitment,
+        nullifier
+    );
+}
+
+#[test]
+fn test_large_tvl_values() {
+    let wallet_pubkey: [u8; 32] = [21; 32];
+    let secret: [u8; 32] = [22; 32];
+
+    let mut preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        preimage[i] = wallet_pubkey[i];
+        preimage[i + 32] = secret[i];
+    }
+    let commitment: [u8; 32] = blake2s(preimage);
+
+    let mut nullifier_preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        nullifier_preimage[i] = wallet_pubkey[i];
+    }
+    let domain: [u8; 9] = [118, 111, 117, 99, 104, 95, 100, 101, 118];
+    for i in 0..9 {
+        nullifier_preimage[32 + i] = domain[i];
+    }
+    let nullifier: [u8; 32] = blake2s(nullifier_preimage);
+
+    // Large TVL values (billions in lamports)
+    let tvl_amounts: [u64; MAX_PROGRAMS] = [1000000000000, 500000000000, 0, 0, 0];
+
+    main(
+        wallet_pubkey,
+        secret,
+        2,
+        tvl_amounts,
+        1000000000000,  // 1 trillion threshold
+        commitment,
+        nullifier
+    );
+}
+
+#[test(should_fail)]
+fn test_wrong_secret_fails() {
+    let wallet_pubkey: [u8; 32] = [23; 32];
+    let secret: [u8; 32] = [24; 32];
+    let wrong_secret: [u8; 32] = [25; 32];  // Different secret
+
+    // Compute commitment with CORRECT secret
+    let mut preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        preimage[i] = wallet_pubkey[i];
+        preimage[i + 32] = secret[i];
+    }
+    let commitment: [u8; 32] = blake2s(preimage);
+
+    let mut nullifier_preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        nullifier_preimage[i] = wallet_pubkey[i];
+    }
+    let domain: [u8; 9] = [118, 111, 117, 99, 104, 95, 100, 101, 118];
+    for i in 0..9 {
+        nullifier_preimage[32 + i] = domain[i];
+    }
+    let nullifier: [u8; 32] = blake2s(nullifier_preimage);
+
+    let tvl_amounts: [u64; MAX_PROGRAMS] = [100000, 0, 0, 0, 0];
+
+    // Use WRONG secret - should fail commitment verification
+    main(
+        wallet_pubkey,
+        wrong_secret,  // Wrong secret
+        1,
+        tvl_amounts,
+        100000,
+        commitment,
+        nullifier
+    );
+}
+
+#[test(should_fail)]
+fn test_wrong_wallet_fails() {
+    let wallet_pubkey: [u8; 32] = [26; 32];
+    let wrong_wallet: [u8; 32] = [27; 32];  // Different wallet
+    let secret: [u8; 32] = [28; 32];
+
+    // Compute commitment with CORRECT wallet
+    let mut preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        preimage[i] = wallet_pubkey[i];
+        preimage[i + 32] = secret[i];
+    }
+    let commitment: [u8; 32] = blake2s(preimage);
+
+    // Compute nullifier with CORRECT wallet
+    let mut nullifier_preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        nullifier_preimage[i] = wallet_pubkey[i];
+    }
+    let domain: [u8; 9] = [118, 111, 117, 99, 104, 95, 100, 101, 118];
+    for i in 0..9 {
+        nullifier_preimage[32 + i] = domain[i];
+    }
+    let nullifier: [u8; 32] = blake2s(nullifier_preimage);
+
+    let tvl_amounts: [u64; MAX_PROGRAMS] = [100000, 0, 0, 0, 0];
+
+    // Use WRONG wallet - should fail
+    main(
+        wrong_wallet,  // Wrong wallet
+        secret,
+        1,
+        tvl_amounts,
+        100000,
+        commitment,
+        nullifier
+    );
+}

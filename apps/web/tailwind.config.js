@@ -39,11 +39,97 @@ module.exports = {
           DEFAULT: 'hsl(var(--card))',
           foreground: 'hsl(var(--card-foreground))',
         },
+        // Glow colors for neon effects
+        glow: {
+          cyan: 'rgba(0, 255, 255, 0.5)',
+          purple: 'rgba(153, 69, 255, 0.5)',
+          green: 'rgba(0, 255, 136, 0.5)',
+        },
+      },
+      fontFamily: {
+        sans: ['var(--font-sans)', 'system-ui', 'sans-serif'],
+        display: ['var(--font-display)', 'system-ui', 'sans-serif'],
+        mono: ['var(--font-mono)', 'monospace'],
       },
       borderRadius: {
         lg: 'var(--radius)',
         md: 'calc(var(--radius) - 2px)',
         sm: 'calc(var(--radius) - 4px)',
+      },
+      boxShadow: {
+        'glow-sm': '0 0 10px var(--tw-shadow-color)',
+        'glow-md': '0 0 20px var(--tw-shadow-color)',
+        'glow-lg': '0 0 40px var(--tw-shadow-color)',
+        'glow-xl': '0 0 60px var(--tw-shadow-color)',
+        'inner-glow': 'inset 0 0 20px var(--tw-shadow-color)',
+        'neon-cyan': '0 0 5px rgba(0,255,255,0.5), 0 0 20px rgba(0,255,255,0.3), 0 0 40px rgba(0,255,255,0.2)',
+        'neon-purple': '0 0 5px rgba(153,69,255,0.5), 0 0 20px rgba(153,69,255,0.3), 0 0 40px rgba(153,69,255,0.2)',
+        'neon-green': '0 0 5px rgba(0,255,136,0.5), 0 0 20px rgba(0,255,136,0.3), 0 0 40px rgba(0,255,136,0.2)',
+      },
+      animation: {
+        'pulse-glow': 'pulse-glow 2s ease-in-out infinite',
+        'float': 'float 6s ease-in-out infinite',
+        'float-slow': 'float 8s ease-in-out infinite',
+        'scan-line': 'scan-line 8s linear infinite',
+        'glitch': 'glitch 0.3s ease-in-out',
+        'fade-in-up': 'fade-in-up 0.6s ease-out forwards',
+        'fade-in-down': 'fade-in-down 0.6s ease-out forwards',
+        'slide-in-left': 'slide-in-left 0.6s ease-out forwards',
+        'slide-in-right': 'slide-in-right 0.6s ease-out forwards',
+        'scale-in': 'scale-in 0.3s ease-out forwards',
+        'spin-slow': 'spin 3s linear infinite',
+        'ping-slow': 'ping 2s cubic-bezier(0, 0, 0.2, 1) infinite',
+      },
+      keyframes: {
+        'pulse-glow': {
+          '0%, 100%': { opacity: '1', filter: 'brightness(1)' },
+          '50%': { opacity: '0.8', filter: 'brightness(1.3)' },
+        },
+        'float': {
+          '0%, 100%': { transform: 'translateY(0)' },
+          '50%': { transform: 'translateY(-10px)' },
+        },
+        'scan-line': {
+          '0%': { transform: 'translateY(-100%)' },
+          '100%': { transform: 'translateY(100vh)' },
+        },
+        'glitch': {
+          '0%, 100%': { transform: 'translate(0)' },
+          '20%': { transform: 'translate(-2px, 2px)' },
+          '40%': { transform: 'translate(-2px, -2px)' },
+          '60%': { transform: 'translate(2px, 2px)' },
+          '80%': { transform: 'translate(2px, -2px)' },
+        },
+        'fade-in-up': {
+          '0%': { opacity: '0', transform: 'translateY(20px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        'fade-in-down': {
+          '0%': { opacity: '0', transform: 'translateY(-20px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        'slide-in-left': {
+          '0%': { opacity: '0', transform: 'translateX(-20px)' },
+          '100%': { opacity: '1', transform: 'translateX(0)' },
+        },
+        'slide-in-right': {
+          '0%': { opacity: '0', transform: 'translateX(20px)' },
+          '100%': { opacity: '1', transform: 'translateX(0)' },
+        },
+        'scale-in': {
+          '0%': { opacity: '0', transform: 'scale(0.9)' },
+          '100%': { opacity: '1', transform: 'scale(1)' },
+        },
+      },
+      backgroundImage: {
+        'grid-pattern': 'linear-gradient(rgba(0,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(0,255,255,0.03) 1px, transparent 1px)',
+        'grid-pattern-dense': 'linear-gradient(rgba(0,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(0,255,255,0.05) 1px, transparent 1px)',
+        'radial-glow': 'radial-gradient(ellipse at center, var(--tw-gradient-from) 0%, transparent 70%)',
+        'radial-glow-sm': 'radial-gradient(ellipse at center, var(--tw-gradient-from) 0%, transparent 50%)',
+      },
+      backgroundSize: {
+        'grid': '50px 50px',
+        'grid-sm': '25px 25px',
       },
     },
   },

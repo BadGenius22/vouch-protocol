@@ -282,3 +282,304 @@ fn test_zero_trades_fails() {
         nullifier
     );
 }
+
+// === Additional Edge Case Tests ===
+
+#[test]
+fn test_single_large_trade() {
+    let wallet_pubkey: [u8; 32] = [15; 32];
+    let secret: [u8; 32] = [16; 32];
+
+    let mut preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        preimage[i] = wallet_pubkey[i];
+        preimage[i + 32] = secret[i];
+    }
+    let commitment: [u8; 32] = blake2s(preimage);
+
+    let mut nullifier_preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        nullifier_preimage[i] = wallet_pubkey[i];
+    }
+    let domain: [u8; 11] = [118, 111, 117, 99, 104, 95, 119, 104, 97, 108, 101];
+    for i in 0..11 {
+        nullifier_preimage[32 + i] = domain[i];
+    }
+    let nullifier: [u8; 32] = blake2s(nullifier_preimage);
+
+    // Single trade of 1M volume
+    let mut trade_amounts: [u64; MAX_TRADES] = [0; MAX_TRADES];
+    trade_amounts[0] = 1000000;
+
+    main(
+        wallet_pubkey,
+        secret,
+        1,
+        trade_amounts,
+        100000,  // 100K threshold
+        commitment,
+        nullifier
+    );
+}
+
+#[test]
+fn test_max_trades() {
+    let wallet_pubkey: [u8; 32] = [17; 32];
+    let secret: [u8; 32] = [18; 32];
+
+    let mut preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        preimage[i] = wallet_pubkey[i];
+        preimage[i + 32] = secret[i];
+    }
+    let commitment: [u8; 32] = blake2s(preimage);
+
+    let mut nullifier_preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        nullifier_preimage[i] = wallet_pubkey[i];
+    }
+    let domain: [u8; 11] = [118, 111, 117, 99, 104, 95, 119, 104, 97, 108, 101];
+    for i in 0..11 {
+        nullifier_preimage[32 + i] = domain[i];
+    }
+    let nullifier: [u8; 32] = blake2s(nullifier_preimage);
+
+    // All 20 trades with small amounts (5K each = 100K total)
+    let trade_amounts: [u64; MAX_TRADES] = [5000; MAX_TRADES];
+
+    main(
+        wallet_pubkey,
+        secret,
+        20,  // MAX_TRADES
+        trade_amounts,
+        100000,  // Exactly 100K
+        commitment,
+        nullifier
+    );
+}
+
+#[test]
+fn test_zero_threshold() {
+    let wallet_pubkey: [u8; 32] = [19; 32];
+    let secret: [u8; 32] = [20; 32];
+
+    let mut preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        preimage[i] = wallet_pubkey[i];
+        preimage[i + 32] = secret[i];
+    }
+    let commitment: [u8; 32] = blake2s(preimage);
+
+    let mut nullifier_preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        nullifier_preimage[i] = wallet_pubkey[i];
+    }
+    let domain: [u8; 11] = [118, 111, 117, 99, 104, 95, 119, 104, 97, 108, 101];
+    for i in 0..11 {
+        nullifier_preimage[32 + i] = domain[i];
+    }
+    let nullifier: [u8; 32] = blake2s(nullifier_preimage);
+
+    // Zero volume with zero threshold should pass
+    let trade_amounts: [u64; MAX_TRADES] = [0; MAX_TRADES];
+
+    main(
+        wallet_pubkey,
+        secret,
+        1,
+        trade_amounts,
+        0,  // Zero threshold
+        commitment,
+        nullifier
+    );
+}
+
+#[test(should_fail)]
+fn test_exceed_max_trades_fails() {
+    let wallet_pubkey: [u8; 32] = [21; 32];
+    let secret: [u8; 32] = [22; 32];
+
+    let mut preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        preimage[i] = wallet_pubkey[i];
+        preimage[i + 32] = secret[i];
+    }
+    let commitment: [u8; 32] = blake2s(preimage);
+
+    let mut nullifier_preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        nullifier_preimage[i] = wallet_pubkey[i];
+    }
+    let domain: [u8; 11] = [118, 111, 117, 99, 104, 95, 119, 104, 97, 108, 101];
+    for i in 0..11 {
+        nullifier_preimage[32 + i] = domain[i];
+    }
+    let nullifier: [u8; 32] = blake2s(nullifier_preimage);
+
+    let trade_amounts: [u64; MAX_TRADES] = [10000; MAX_TRADES];
+
+    // trade_count = 21 exceeds MAX_TRADES (20) - should fail
+    main(
+        wallet_pubkey,
+        secret,
+        21,  // Exceeds MAX_TRADES
+        trade_amounts,
+        50000,
+        commitment,
+        nullifier
+    );
+}
+
+#[test]
+fn test_large_volume_values() {
+    let wallet_pubkey: [u8; 32] = [23; 32];
+    let secret: [u8; 32] = [24; 32];
+
+    let mut preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        preimage[i] = wallet_pubkey[i];
+        preimage[i + 32] = secret[i];
+    }
+    let commitment: [u8; 32] = blake2s(preimage);
+
+    let mut nullifier_preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        nullifier_preimage[i] = wallet_pubkey[i];
+    }
+    let domain: [u8; 11] = [118, 111, 117, 99, 104, 95, 119, 104, 97, 108, 101];
+    for i in 0..11 {
+        nullifier_preimage[32 + i] = domain[i];
+    }
+    let nullifier: [u8; 32] = blake2s(nullifier_preimage);
+
+    // Large trade values (billions in lamports)
+    let mut trade_amounts: [u64; MAX_TRADES] = [0; MAX_TRADES];
+    trade_amounts[0] = 1000000000000;  // 1 trillion
+    trade_amounts[1] = 500000000000;   // 500 billion
+
+    main(
+        wallet_pubkey,
+        secret,
+        2,
+        trade_amounts,
+        1000000000000,  // 1 trillion threshold
+        commitment,
+        nullifier
+    );
+}
+
+#[test(should_fail)]
+fn test_wrong_secret_fails() {
+    let wallet_pubkey: [u8; 32] = [25; 32];
+    let secret: [u8; 32] = [26; 32];
+    let wrong_secret: [u8; 32] = [27; 32];
+
+    // Compute commitment with CORRECT secret
+    let mut preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        preimage[i] = wallet_pubkey[i];
+        preimage[i + 32] = secret[i];
+    }
+    let commitment: [u8; 32] = blake2s(preimage);
+
+    let mut nullifier_preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        nullifier_preimage[i] = wallet_pubkey[i];
+    }
+    let domain: [u8; 11] = [118, 111, 117, 99, 104, 95, 119, 104, 97, 108, 101];
+    for i in 0..11 {
+        nullifier_preimage[32 + i] = domain[i];
+    }
+    let nullifier: [u8; 32] = blake2s(nullifier_preimage);
+
+    let mut trade_amounts: [u64; MAX_TRADES] = [0; MAX_TRADES];
+    trade_amounts[0] = 100000;
+
+    // Use WRONG secret - should fail
+    main(
+        wallet_pubkey,
+        wrong_secret,  // Wrong secret
+        1,
+        trade_amounts,
+        50000,
+        commitment,
+        nullifier
+    );
+}
+
+#[test(should_fail)]
+fn test_wrong_wallet_fails() {
+    let wallet_pubkey: [u8; 32] = [28; 32];
+    let wrong_wallet: [u8; 32] = [29; 32];
+    let secret: [u8; 32] = [30; 32];
+
+    // Compute commitment with CORRECT wallet
+    let mut preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        preimage[i] = wallet_pubkey[i];
+        preimage[i + 32] = secret[i];
+    }
+    let commitment: [u8; 32] = blake2s(preimage);
+
+    // Compute nullifier with CORRECT wallet
+    let mut nullifier_preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        nullifier_preimage[i] = wallet_pubkey[i];
+    }
+    let domain: [u8; 11] = [118, 111, 117, 99, 104, 95, 119, 104, 97, 108, 101];
+    for i in 0..11 {
+        nullifier_preimage[32 + i] = domain[i];
+    }
+    let nullifier: [u8; 32] = blake2s(nullifier_preimage);
+
+    let mut trade_amounts: [u64; MAX_TRADES] = [0; MAX_TRADES];
+    trade_amounts[0] = 100000;
+
+    // Use WRONG wallet - should fail
+    main(
+        wrong_wallet,  // Wrong wallet
+        secret,
+        1,
+        trade_amounts,
+        50000,
+        commitment,
+        nullifier
+    );
+}
+
+#[test]
+fn test_threshold_exact_match() {
+    let wallet_pubkey: [u8; 32] = [31; 32];
+    let secret: [u8; 32] = [32; 32];
+
+    let mut preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        preimage[i] = wallet_pubkey[i];
+        preimage[i + 32] = secret[i];
+    }
+    let commitment: [u8; 32] = blake2s(preimage);
+
+    let mut nullifier_preimage: [u8; 64] = [0; 64];
+    for i in 0..32 {
+        nullifier_preimage[i] = wallet_pubkey[i];
+    }
+    let domain: [u8; 11] = [118, 111, 117, 99, 104, 95, 119, 104, 97, 108, 101];
+    for i in 0..11 {
+        nullifier_preimage[32 + i] = domain[i];
+    }
+    let nullifier: [u8; 32] = blake2s(nullifier_preimage);
+
+    // Exactly 50K volume (meets 50K threshold)
+    let mut trade_amounts: [u64; MAX_TRADES] = [0; MAX_TRADES];
+    trade_amounts[0] = 50000;
+
+    main(
+        wallet_pubkey,
+        secret,
+        1,
+        trade_amounts,
+        50000,  // Exact match
+        commitment,
+        nullifier
+    );
+}

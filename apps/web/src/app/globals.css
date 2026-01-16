@@ -4,44 +4,40 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --primary: 262.1 83.3% 57.8%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 262.1 83.3% 57.8%;
-    --radius: 0.5rem;
-  }
+    /* Cyberpunk Dark Theme - Default */
+    --background: 240 10% 4%;           /* #0a0a0f - deep space black */
+    --foreground: 210 40% 98%;          /* off-white text */
 
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
+    /* Card surfaces with glassmorphism */
+    --card: 240 10% 8%;                 /* slightly elevated surface */
     --card-foreground: 210 40% 98%;
-    --primary: 262.1 83.3% 57.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
+
+    /* Neon cyan - primary accent */
+    --primary: 180 100% 50%;            /* #00ffff - cyan neon */
+    --primary-foreground: 240 10% 4%;
+
+    /* Neon purple - secondary accent */
+    --secondary: 270 100% 65%;          /* #9945ff - purple neon */
     --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
+
+    /* Matrix green - success/accent states */
+    --accent: 150 100% 50%;             /* #00ff88 - matrix green */
+    --accent-foreground: 240 10% 4%;
+
+    /* Muted elements */
+    --muted: 240 5% 15%;
+    --muted-foreground: 215 20% 55%;
+
+    /* Borders */
+    --border: 240 5% 20%;
+    --input: 240 5% 12%;
+    --ring: 180 100% 50%;
+
+    /* Destructive */
+    --destructive: 0 90% 60%;
     --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 262.1 83.3% 57.8%;
+
+    --radius: 0.75rem;
   }
 
   * {
@@ -50,5 +46,64 @@
 
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Reduced motion support */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* Custom scrollbar for cyberpunk theme */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--background));
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--primary) / 0.5);
+  }
+}
+
+@layer utilities {
+  /* Text glow utilities */
+  .text-glow-cyan {
+    text-shadow: 0 0 10px rgba(0, 255, 255, 0.8), 0 0 20px rgba(0, 255, 255, 0.5), 0 0 30px rgba(0, 255, 255, 0.3);
+  }
+
+  .text-glow-purple {
+    text-shadow: 0 0 10px rgba(153, 69, 255, 0.8), 0 0 20px rgba(153, 69, 255, 0.5), 0 0 30px rgba(153, 69, 255, 0.3);
+  }
+
+  .text-glow-green {
+    text-shadow: 0 0 10px rgba(0, 255, 136, 0.8), 0 0 20px rgba(0, 255, 136, 0.5), 0 0 30px rgba(0, 255, 136, 0.3);
+  }
+
+  /* Gradient shift animation for loading bars */
+  @keyframes gradient-shift {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+
+  .animate-gradient-shift {
+    animation: gradient-shift 2s linear infinite;
+    background-size: 200% 100%;
   }
 }

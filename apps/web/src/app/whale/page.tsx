@@ -1,14 +1,20 @@
 'use client';
 
-import { useReducer, useCallback } from 'react';
+import { useReducer, useCallback, useRef, useState } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import gsap from 'gsap';
+import { useGSAP } from '@gsap/react';
+import { GlowCard } from '@/components/ui/glow-card';
+import { GlowButton } from '@/components/ui/glow-button';
+import { StepIndicator } from '@/components/ui/step-indicator';
+import { ProofLoading } from '@/components/ui/proof-loading';
 import { WalletButton } from '@/components/wallet/wallet-button';
 import { WasmErrorBoundary } from '@/components/error-boundary';
 import { getTradingVolume } from '@/app/actions/helius';
 import type { TradingVolumeData, ProofResult, VerificationResult } from '@/lib/types';
-import { Loader2, CheckCircle, XCircle, ExternalLink } from 'lucide-react';
+import { CheckCircle, XCircle, ExternalLink, Wallet, Shield, ArrowRight, TrendingUp } from 'lucide-react';
+
+gsap.registerPlugin(useGSAP);
 
 // === State Types ===
 
@@ -34,6 +40,16 @@ type WhaleAction =
   | { type: 'SET_VERIFICATION_RESULT'; verificationResult: VerificationResult }
   | { type: 'SET_STEP'; step: Step }
   | { type: 'RESET' };
+
+// === Constants ===
+
+const STEPS = [
+  { id: 'connect', label: 'Connect' },
+  { id: 'fetch', label: 'Fetch' },
+  { id: 'generate', label: 'Prove' },
+  { id: 'verify', label: 'Verify' },
+  { id: 'complete', label: 'Done' },
+];
 
 // === Reducer ===
 
@@ -77,15 +93,34 @@ function whaleReducer(state: WhaleState, action: WhaleAction): WhaleState {
 // === Component ===
 
 function WhalePageContent() {
+  const containerRef = useRef<HTMLDivElement>(null);
   const { connected, publicKey, signTransaction } = useWallet();
   const { connection } = useConnection();
   const [state, dispatch] = useReducer(whaleReducer, initialState);
+  const [proofProgress, setProofProgress] = useState(0);
 
   const { step, loading, error, tradingData, proofResult, verificationResult } = state;
+
+  // GSAP animations
+  useGSAP(
+    () => {
+      gsap.from('.page-header', { opacity: 0, y: 30, duration: 0.6 });
+      gsap.from('.step-indicator-wrapper', { opacity: 0, y: 20, duration: 0.5, delay: 0.2 });
+      gsap.from('.main-card', { opacity: 0, y: 40, duration: 0.7, delay: 0.3 });
+    },
+    { scope: containerRef }
+  );
+
+  const getCompletedSteps = (): string[] => {
+    const stepOrder = ['connect', 'fetch', 'generate', 'verify', 'complete'];
+    const currentIndex = stepOrder.indexOf(step);
+    return stepOrder.slice(0, currentIndex);
+  };
 
   const handleFetchData = useCallback(async () => {
     if (!publicKey) return;
     dispatch({ type: 'START_LOADING' });
+    dispatch({ type: 'SET_STEP', step: 'fetch' });
 
     try {
       const result = await getTradingVolume(publicKey.toBase58(), 30);
@@ -94,6 +129,7 @@ function WhalePageContent() {
       }
       dispatch({ type: 'SET_TRADING_DATA', tradingData: result.data });
     } catch (err) {
+      dispatch({ type: 'SET_STEP', step: 'connect' });
       dispatch({
         type: 'SET_ERROR',
         error: err instanceof Error ? err.message : 'Failed to fetch data',
@@ -104,17 +140,29 @@ function WhalePageContent() {
   const handleGenerateProof = useCallback(async () => {
     if (!publicKey || !tradingData) return;
     dispatch({ type: 'START_LOADING' });
+    setProofProgress(0);
 
     try {
-      // Dynamic import to avoid SSR issues with WASM
+      // Simulate progress for better UX
+      const progressInterval = setInterval(() => {
+        setProofProgress((prev) => Math.min(prev + Math.random() * 15, 90));
+      }, 500);
+
       const { generateWhaleTradingProof } = await import('@/lib/proof');
       const result = await generateWhaleTradingProof({
         walletPubkey: publicKey.toBase58(),
         tradingData,
         minVolume: 50000,
       });
-      dispatch({ type: 'SET_PROOF_RESULT', proofResult: result });
+
+      clearInterval(progressInterval);
+      setProofProgress(100);
+
+      setTimeout(() => {
+        dispatch({ type: 'SET_PROOF_RESULT', proofResult: result });
+      }, 500);
     } catch (err) {
+      setProofProgress(0);
       dispatch({
         type: 'SET_ERROR',
         error: err instanceof Error ? err.message : 'Failed to generate proof',
@@ -127,13 +175,10 @@ function WhalePageContent() {
     dispatch({ type: 'START_LOADING' });
 
     try {
-      // Dynamic import to avoid SSR issues
       const { submitProofToChain, isProgramDeployed } = await import('@/lib/verify');
-
-      // Check if program is deployed
       const deployed = await isProgramDeployed(connection);
+
       if (!deployed) {
-        // For demo/hackathon: show success with mock signature
         dispatch({
           type: 'SET_VERIFICATION_RESULT',
           verificationResult: {
@@ -144,21 +189,11 @@ function WhalePageContent() {
         return;
       }
 
-      // Submit proof to chain
-      const result = await submitProofToChain(
-        connection,
-        proofResult,
-        'whale',
-        publicKey,
-        signTransaction
-      );
+      const result = await submitProofToChain(connection, proofResult, 'whale', publicKey, signTransaction);
 
       dispatch({ type: 'SET_VERIFICATION_RESULT', verificationResult: result });
       if (!result.success) {
-        dispatch({
-          type: 'SET_ERROR',
-          error: result.error || 'Verification failed',
-        });
+        dispatch({ type: 'SET_ERROR', error: result.error || 'Verification failed' });
       }
     } catch (err) {
       dispatch({
@@ -170,6 +205,7 @@ function WhalePageContent() {
 
   const handleReset = useCallback(() => {
     dispatch({ type: 'RESET' });
+    setProofProgress(0);
   }, []);
 
   const meetsThreshold = tradingData ? tradingData.totalVolume >= 50000 : false;
@@ -180,208 +216,213 @@ function WhalePageContent() {
   };
 
   return (
-    <div className="container mx-auto px-4 py-16 max-w-4xl">
-      <h1 className="text-4xl font-bold mb-2">Whale Trading Proof</h1>
-      <p className="text-muted-foreground mb-8">
-        Prove your trading volume without exposing your wallet
-      </p>
-
-      {error && (
-        <div
-          className="mb-6 p-4 bg-destructive/10 border border-destructive rounded-lg flex items-center gap-2"
-          role="alert"
-          aria-live="assertive"
-        >
-          <XCircle className="w-5 h-5 text-destructive" aria-hidden="true" />
-          <span className="text-destructive">{error}</span>
+    <div ref={containerRef} className="container mx-auto px-4 py-12 max-w-4xl">
+      {/* Header */}
+      <div className="page-header text-center mb-8">
+        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-secondary/30 bg-secondary/5 mb-4">
+          <Wallet className="w-4 h-4 text-secondary" />
+          <span className="text-sm text-secondary font-mono">Whale Proof</span>
         </div>
+        <h1 className="text-4xl md:text-5xl font-display font-bold mb-3">
+          Whale <span className="text-secondary text-glow-purple">Trading</span>
+        </h1>
+        <p className="text-muted-foreground text-lg max-w-xl mx-auto">
+          Prove your trading volume without exposing your wallet
+        </p>
+      </div>
+
+      {/* Step Indicator */}
+      <div className="step-indicator-wrapper mb-8">
+        <StepIndicator steps={STEPS} currentStep={step} completedSteps={getCompletedSteps()} />
+      </div>
+
+      {/* Error Alert */}
+      {error && (
+        <GlowCard glowColor="purple" className="mb-6 p-4 border-destructive/50 bg-destructive/5">
+          <div className="flex items-center gap-3">
+            <XCircle className="w-5 h-5 text-destructive flex-shrink-0" />
+            <span className="text-destructive text-sm">{error}</span>
+          </div>
+        </GlowCard>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            {step === 'connect' && 'Connect Wallet'}
-            {step === 'generate' && 'Generate ZK Proof'}
-            {step === 'verify' && 'Submit Proof'}
-            {step === 'complete' && 'Verification Complete'}
-          </CardTitle>
-          <CardDescription>
-            {step === 'connect' && 'Connect your trading wallet'}
-            {step === 'generate' && 'Review your trading data and generate a ZK proof'}
-            {step === 'verify' && 'Submit your proof to the Solana verifier'}
-            {step === 'complete' && 'Your whale trading status has been verified on-chain'}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+      {/* Main Card */}
+      <GlowCard className="main-card" glowColor="purple">
+        <div className="p-8">
+          {/* Connect Step */}
           {step === 'connect' && (
-            <div className="text-center py-8">
+            <div className="text-center py-8 animate-fade-in-up">
+              <TrendingUp className="w-16 h-16 text-secondary/30 mx-auto mb-6" />
               {!connected ? (
                 <>
-                  <p className="text-muted-foreground mb-4">Connect your wallet to begin</p>
+                  <h3 className="text-xl font-display font-semibold mb-2">Connect Your Wallet</h3>
+                  <p className="text-muted-foreground mb-6">Connect your trading wallet to begin</p>
                   <WalletButton />
                 </>
               ) : (
-                <div className="space-y-4">
-                  <div className="p-4 bg-muted rounded-lg text-left">
-                    <p className="text-sm text-muted-foreground">Connected</p>
-                    <p className="font-mono text-sm break-all">{publicKey?.toBase58()}</p>
+                <div className="space-y-6">
+                  <div className="p-4 rounded-xl bg-muted/50 border border-border/50">
+                    <p className="text-xs text-muted-foreground mb-1 font-mono uppercase tracking-wider">
+                      Connected Wallet
+                    </p>
+                    <p className="font-mono text-sm text-secondary break-all">{publicKey?.toBase58()}</p>
                   </div>
-                  <Button
-                    onClick={handleFetchData}
-                    className="w-full"
-                    disabled={loading}
-                    aria-busy={loading}
-                    aria-label={loading ? 'Fetching trading data...' : 'Fetch trading data'}
-                  >
-                    {loading && (
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" aria-hidden="true" />
-                    )}
-                    Fetch Trading Data
-                  </Button>
+                  <GlowButton onClick={handleFetchData} disabled={loading} glowColor="purple" className="w-full">
+                    {loading ? 'Fetching...' : 'Fetch Trading Data'}
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </GlowButton>
                 </div>
               )}
             </div>
           )}
 
-          {step === 'generate' && tradingData && (
-            <div className="space-y-4">
-              <div className="p-4 bg-muted rounded-lg">
-                <h3 className="font-semibold mb-2">Trading Activity (30 days)</h3>
-                <dl className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <dt className="text-muted-foreground">Total Volume</dt>
-                    <dd
-                      className={`font-semibold ${meetsThreshold ? 'text-green-600' : 'text-red-600'}`}
+          {/* Fetch Step - Show loading */}
+          {step === 'fetch' && loading && (
+            <div className="py-8 animate-fade-in-up">
+              <ProofLoading status="loading" progress={50} message="Fetching your trading history..." />
+            </div>
+          )}
+
+          {/* Generate Step */}
+          {step === 'generate' && tradingData && !loading && (
+            <div className="space-y-6 animate-fade-in-up">
+              <div className="p-4 rounded-xl bg-muted/50 border border-border/50">
+                <h3 className="font-display font-semibold mb-4 flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-secondary" />
+                  Trading Activity (30 days)
+                </h3>
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="text-center p-4 rounded-lg bg-background/50 border border-border/30">
+                    <p className="text-xs text-muted-foreground font-mono uppercase tracking-wider mb-1">
+                      Total Volume
+                    </p>
+                    <p
+                      className={`text-2xl font-mono font-bold ${
+                        meetsThreshold ? 'text-accent text-glow-green' : 'text-destructive'
+                      }`}
                     >
                       ${tradingData.totalVolume.toLocaleString()}
-                    </dd>
+                    </p>
                   </div>
-                  <div>
-                    <dt className="text-muted-foreground">Trade Count</dt>
-                    <dd className="font-semibold">{tradingData.tradeCount}</dd>
+                  <div className="text-center p-4 rounded-lg bg-background/50 border border-border/30">
+                    <p className="text-xs text-muted-foreground font-mono uppercase tracking-wider mb-1">
+                      Trade Count
+                    </p>
+                    <p className="text-2xl font-mono font-bold text-secondary">{tradingData.tradeCount}</p>
                   </div>
-                </dl>
+                </div>
               </div>
 
               {meetsThreshold ? (
-                <Button
-                  onClick={handleGenerateProof}
-                  className="w-full"
-                  disabled={loading}
-                  aria-busy={loading}
-                  aria-label={loading ? 'Generating proof...' : 'Generate ZK proof'}
-                >
-                  {loading && (
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" aria-hidden="true" />
-                  )}
-                  Generate ZK Proof
-                </Button>
+                <>
+                  <GlowButton onClick={handleGenerateProof} disabled={loading} glowColor="purple" className="w-full">
+                    Generate ZK Proof
+                    <Shield className="ml-2 h-4 w-4" />
+                  </GlowButton>
+                  <p className="text-xs text-center text-muted-foreground">
+                    Proof generated in your browser. Your data never leaves your device.
+                  </p>
+                </>
               ) : (
-                <p className="text-center text-destructive" role="status">
-                  Below $50K threshold
-                </p>
+                <div className="text-center p-4 rounded-xl bg-destructive/5 border border-destructive/20">
+                  <p className="text-destructive font-medium">Below $50K volume threshold</p>
+                  <p className="text-sm text-muted-foreground mt-1">Keep trading to qualify</p>
+                </div>
               )}
-              <p className="text-xs text-center text-muted-foreground">
-                Proof generated in your browser. Data never leaves your device.
-              </p>
             </div>
           )}
 
-          {step === 'verify' && proofResult && (
-            <div className="space-y-4">
-              <div
-                className="p-4 bg-green-50 border border-green-200 rounded-lg"
-                role="status"
-                aria-live="polite"
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <CheckCircle className="w-5 h-5 text-green-600" aria-hidden="true" />
-                  <span className="font-semibold text-green-800">Proof Generated!</span>
+          {/* Proof Generation Loading */}
+          {step === 'generate' && loading && (
+            <div className="py-8 animate-fade-in-up">
+              <ProofLoading status="loading" progress={proofProgress} />
+            </div>
+          )}
+
+          {/* Verify Step */}
+          {step === 'verify' && proofResult && !loading && (
+            <div className="space-y-6 animate-fade-in-up">
+              <div className="p-4 rounded-xl bg-accent/5 border border-accent/20">
+                <div className="flex items-center gap-3 mb-3">
+                  <CheckCircle className="w-6 h-6 text-accent" />
+                  <span className="font-display font-semibold text-accent">Proof Generated!</span>
                 </div>
-                <p className="text-sm text-green-700">
-                  Your ZK proof proves you meet the criteria without revealing your wallet.
+                <p className="text-sm text-muted-foreground">
+                  Your ZK proof proves you meet the whale criteria without revealing your wallet address.
                 </p>
               </div>
-              <div className="p-4 bg-muted rounded-lg space-y-2">
+
+              <div className="p-4 rounded-xl bg-muted/50 border border-border/50 space-y-3">
                 <div>
-                  <p className="text-sm text-muted-foreground">Proof Size</p>
-                  <p className="font-mono">{proofResult.proof.length} bytes</p>
+                  <p className="text-xs text-muted-foreground font-mono uppercase tracking-wider">Proof Size</p>
+                  <p className="font-mono text-secondary">{proofResult.proof.length} bytes</p>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">Nullifier</p>
-                  <p className="font-mono text-xs break-all">
-                    {proofResult.nullifier.slice(0, 32)}...
+                  <p className="text-xs text-muted-foreground font-mono uppercase tracking-wider">Nullifier Hash</p>
+                  <p className="font-mono text-xs text-muted-foreground break-all">
+                    {proofResult.nullifier.slice(0, 48)}...
                   </p>
                 </div>
               </div>
-              <Button
-                onClick={handleSubmitProof}
-                className="w-full"
-                disabled={loading}
-                aria-busy={loading}
-                aria-label={loading ? 'Submitting proof...' : 'Submit proof to verifier'}
-              >
-                {loading && (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" aria-hidden="true" />
-                )}
+
+              <GlowButton onClick={handleSubmitProof} disabled={loading} glowColor="green" className="w-full">
                 Submit to Verifier
-              </Button>
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </GlowButton>
               <p className="text-xs text-center text-muted-foreground">
-                This will create a transaction to verify your proof on-chain.
+                Creates a transaction to verify your proof on Solana
               </p>
             </div>
           )}
 
+          {/* Submit Loading */}
+          {step === 'verify' && loading && (
+            <div className="py-8 animate-fade-in-up">
+              <ProofLoading status="loading" progress={75} message="Submitting proof to Solana..." />
+            </div>
+          )}
+
+          {/* Complete Step */}
           {step === 'complete' && verificationResult && (
-            <div className="space-y-4">
-              <div
-                className="p-4 bg-green-50 border border-green-200 rounded-lg"
-                role="status"
-                aria-live="polite"
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <CheckCircle className="w-5 h-5 text-green-600" aria-hidden="true" />
-                  <span className="font-semibold text-green-800">Verified On-Chain!</span>
+            <div className="space-y-6 animate-fade-in-up">
+              <div className="text-center py-4">
+                <div className="w-20 h-20 rounded-full bg-accent/10 border border-accent/30 flex items-center justify-center mx-auto mb-4 shadow-neon-green">
+                  <CheckCircle className="w-10 h-10 text-accent" />
                 </div>
-                <p className="text-sm text-green-700">
-                  Your whale trading status has been verified and recorded on Solana.
+                <h3 className="text-2xl font-display font-bold text-accent text-glow-green mb-2">Verified On-Chain!</h3>
+                <p className="text-muted-foreground">
+                  Your whale trading status has been verified and recorded on Solana
                 </p>
               </div>
+
               {verificationResult.signature && (
-                <div className="p-4 bg-muted rounded-lg">
-                  <p className="text-sm text-muted-foreground mb-1">Transaction Signature</p>
+                <div className="p-4 rounded-xl bg-muted/50 border border-border/50">
+                  <p className="text-xs text-muted-foreground font-mono uppercase tracking-wider mb-2">
+                    Transaction Signature
+                  </p>
                   <a
                     href={getSolscanUrl(verificationResult.signature)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="font-mono text-xs break-all text-blue-600 hover:underline flex items-center gap-1"
-                    aria-label={`View transaction ${verificationResult.signature.slice(0, 16)}... on Solscan`}
+                    className="font-mono text-xs text-secondary hover:text-secondary/80 break-all flex items-center gap-2 transition-colors"
                   >
-                    {verificationResult.signature.slice(0, 32)}...
-                    <ExternalLink className="w-3 h-3" aria-hidden="true" />
+                    {verificationResult.signature.slice(0, 48)}...
+                    <ExternalLink className="w-3 h-3 flex-shrink-0" />
                   </a>
                 </div>
               )}
-              <Button
-                onClick={handleReset}
-                variant="outline"
-                className="w-full"
-                aria-label="Start a new verification"
-              >
+
+              <GlowButton onClick={handleReset} variant="outline" glowColor="purple" className="w-full">
                 Start New Verification
-              </Button>
+              </GlowButton>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </GlowCard>
     </div>
   );
 }
 
-/**
- * Whale Trading Proof Page
- * Wrapped with WasmErrorBoundary to handle WASM/circuit loading failures gracefully
- */
 export default function WhalePage() {
   return (
     <WasmErrorBoundary
