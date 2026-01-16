@@ -30,6 +30,7 @@
     "@solana/wallet-adapter-wallets": "^0.19.32",
     "@solana/web3.js": "^1.95.0",
     "blakejs": "^1.2.1",
+    "bs58": "^5.0.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",
     "gsap": "^3.14.2",
@@ -42,6 +43,7 @@
     "tailwind-merge": "^2.2.0",
     "tailwindcss-animate": "^1.0.7",
     "three": "^0.169.0",
+    "tweetnacl": "^1.0.3",
     "zod": "^3.22.0"
   },
   "devDependencies": {

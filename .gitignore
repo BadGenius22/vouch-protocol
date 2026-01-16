@@ -7,11 +7,21 @@ apps/web/out/
 dist/
 target/
 
-# Environment
+# Environment (keep .env.example files)
 .env
 .env.local
 .env.*.local
+.env.development
+.env.staging
+.env.production
 apps/web/.env.local
+apps/web/.env.development
+apps/web/.env.staging
+apps/web/.env.production
+apps/verifier/.env.local
+apps/verifier/.env.development
+apps/verifier/.env.staging
+apps/verifier/.env.production
 
 # IDE
 .vscode/
@@ -34,6 +44,10 @@ programs/*/target/
 
 # Testing
 coverage/
+test-results/
+playwright-report/
+apps/web/test-results/
+apps/web/playwright-report/
 
 # Misc 
 *.tsbuildinfo

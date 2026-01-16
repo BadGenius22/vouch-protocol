@@ -54,7 +54,22 @@ interface VerifierHealth {
 
 // === Configuration ===
 
-const VERIFIER_URL = process.env.NEXT_PUBLIC_VERIFIER_URL || 'http://localhost:3001';
+/**
+ * Get the base URL for API calls
+ * Uses relative URLs on client, absolute URLs on server
+ */
+function getApiBaseUrl(): string {
+  // Client-side: use relative URLs (same origin)
+  if (typeof window !== 'undefined') {
+    return '';
+  }
+  // Server-side: need absolute URL
+  const vercelUrl = process.env.VERCEL_URL;
+  if (vercelUrl) {
+    return `https://${vercelUrl}`;
+  }
+  return process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+}
 
 // === Verifier Service API ===
 
@@ -63,15 +78,16 @@ const VERIFIER_URL = process.env.NEXT_PUBLIC_VERIFIER_URL || 'http://localhost:3
  */
 export async function isVerifierAvailable(): Promise<boolean> {
   try {
-    const response = await fetch(`${VERIFIER_URL}/health`, {
+    const baseUrl = getApiBaseUrl();
+    const response = await fetch(`${baseUrl}/api/health`, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
     });
 
     if (!response.ok) return false;
 
-    const health: VerifierHealth = await response.json();
-    return health.status === 'ok';
+    const health = await response.json();
+    return health.status === 'healthy' || health.status === 'ok';
   } catch {
     return false;
   }
@@ -82,14 +98,22 @@ export async function isVerifierAvailable(): Promise<boolean> {
  */
 export async function getVerifierHealth(): Promise<VerifierHealth | null> {
   try {
-    const response = await fetch(`${VERIFIER_URL}/health`, {
+    const baseUrl = getApiBaseUrl();
+    const response = await fetch(`${baseUrl}/api/verifier`, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
     });
 
     if (!response.ok) return null;
 
-    return await response.json();
+    const data = await response.json();
+    // Transform to expected format
+    return {
+      status: 'ok',
+      version: '0.1.0',
+      verifier: data.publicKey,
+      circuitsLoaded: data.circuitsLoaded || { developer: false, whale: false },
+    };
   } catch {
     return null;
   }
@@ -110,7 +134,8 @@ export async function verifyProofWithService(
     // Convert proof bytes to hex string
     const proofHex = Buffer.from(proof.proof).toString('hex');
 
-    const response = await fetch(`${VERIFIER_URL}/verify`, {
+    const baseUrl = getApiBaseUrl();
+    const response = await fetch(`${baseUrl}/api/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
