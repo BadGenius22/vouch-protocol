@@ -32,10 +32,10 @@ export const SECURITY_CONSTANTS = {
   MAX_PROOF_TTL_MS: 30 * 60 * 1000,
   /** Minimum proof TTL in milliseconds (1 minute) */
   MIN_PROOF_TTL_MS: 60 * 1000,
-  /** Maximum proof size in bytes */
-  MAX_PROOF_SIZE_BYTES: 4096,
-  /** Maximum public inputs size in bytes */
-  MAX_PUBLIC_INPUTS_SIZE_BYTES: 1024,
+  /** Maximum proof size in bytes (UltraHonk proofs are ~16KB) */
+  MAX_PROOF_SIZE_BYTES: 32768,
+  /** Maximum public inputs size in bytes (UltraHonk has larger public inputs) */
+  MAX_PUBLIC_INPUTS_SIZE_BYTES: 8192,
 } as const;
 
 // === Proof Types ===

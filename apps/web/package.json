@@ -15,7 +15,7 @@
     "test:e2e:debug": "playwright test --debug"
   },
   "dependencies": {
-    "@aztec/bb.js": "0.82.3",
+    "@aztec/bb.js": "3.0.2",
     "@coral-xyz/anchor": "^0.29.0",
     "@gsap/react": "^2.1.2",
     "@noir-lang/noir_js": "1.0.0-beta.18",

@@ -56,10 +56,8 @@ fn main(
     }
     let computed_nullifier: [u8; 32] = blake2s(nullifier_preimage);
 
-    // Compare nullifier byte by byte
-    for i in 0..32 {
-        assert(computed_nullifier[i] == nullifier[i]);
-    }
+    // Direct array comparison (more efficient than byte-by-byte)
+    assert(computed_nullifier == nullifier);
 }
 
 #[test]

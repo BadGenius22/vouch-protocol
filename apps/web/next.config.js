@@ -17,7 +17,8 @@ const ContentSecurityPolicy = `
     wss://*.helius-rpc.com
     wss://*.helius.xyz
     https://verifier.vouch.dev
-    https://*.sentry.io;
+    https://*.sentry.io
+    https://aztec-ignition.s3.amazonaws.com;
   worker-src 'self' blob:;
   frame-ancestors 'none';
   base-uri 'self';
@@ -27,11 +28,14 @@ const ContentSecurityPolicy = `
 `.replace(/\s{2,}/g, ' ').trim();
 
 // Security headers following OWASP recommendations
+// Note: COEP is set to 'credentialless' instead of 'require-corp' to allow
+// @aztec/bb.js WASM loading while still enabling SharedArrayBuffer
 const securityHeaders = [
   // COOP/COEP required for SharedArrayBuffer (Barretenberg multithreading)
+  // Using 'credentialless' allows cross-origin WASM while still enabling SharedArrayBuffer
   {
     key: 'Cross-Origin-Embedder-Policy',
-    value: 'require-corp',
+    value: 'credentialless',
   },
   {
     key: 'Cross-Origin-Opener-Policy',
@@ -81,10 +85,34 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: '10mb',
     },
+    // Externalize packages that use WASM/Workers (don't bundle in serverless)
+    serverComponentsExternalPackages: [
+      '@aztec/bb.js',
+      '@noir-lang/noir_js',
+      '@noir-lang/types',
+    ],
   },
 
   // Security headers
   async headers() {
+    // In development, use minimal headers to avoid WASM loading issues
+    const isDev = process.env.NODE_ENV === 'development';
+
+    if (isDev) {
+      return [
+        {
+          source: '/:path*',
+          headers: [
+            // Only COOP for SharedArrayBuffer, skip COEP to allow external fetches
+            {
+              key: 'Cross-Origin-Opener-Policy',
+              value: 'same-origin',
+            },
+          ],
+        },
+      ];
+    }
+
     return [
       {
         source: '/:path*',

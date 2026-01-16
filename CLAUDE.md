@@ -17,7 +17,7 @@ Always use these skills when working on this repository:
 ## Tech Stack
 
 - **Blockchain:** Solana (Anchor 0.29+)
-- **ZK Framework:** Noir 1.0.0-beta.18 + UltraHonk (@aztec/bb.js 0.82.3) - client-side proof generation
+- **ZK Framework:** Noir 1.0.0-beta.18 + UltraHonk (@aztec/bb.js 3.0.2) - client-side proof generation
 - **Frontend:** Next.js 14 (App Router), Tailwind CSS, shadcn/ui
 - **Data:** Helius SDK (via Server Actions)
 - **Build System:** Turborepo + pnpm
@@ -178,7 +178,7 @@ All Noir components must use matching versions. Pin exact versions to avoid type
 |-----------|---------|
 | Nargo CLI | 1.0.0-beta.18 |
 | @noir-lang/noir_js | 1.0.0-beta.18 |
-| @aztec/bb.js | 0.82.3 |
+| @aztec/bb.js | 3.0.2 |
 | @noir-lang/types | 1.0.0-beta.18 |
 
 ## Proving System Choice

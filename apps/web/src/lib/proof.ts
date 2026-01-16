@@ -491,11 +491,27 @@ export async function generateDevReputationProof(
 
     // Step 4: Execute circuit to generate witness
     updateProgress('generating', 50, 'Executing circuit to generate witness...');
+    debugLog('Executing circuit with inputs...');
     const { witness } = await noir.execute(circuitInputs);
+    debugLog('Circuit execution complete, witness generated');
 
     // Step 5: Generate proof from witness
     updateProgress('generating', 70, 'Generating ZK proof (this may take a moment)...');
-    const proofData = await backend.generateProof(witness);
+    debugLog('Starting backend.generateProof - this triggers CRS download...');
+    let proofData;
+    try {
+      proofData = await backend.generateProof(witness);
+      debugLog('Proof generation completed successfully');
+    } catch (proofError) {
+      // Log detailed error info for debugging
+      console.error('[Vouch] Backend proof generation failed:', proofError);
+      if (proofError instanceof Error) {
+        console.error('[Vouch] Error name:', proofError.name);
+        console.error('[Vouch] Error message:', proofError.message);
+        console.error('[Vouch] Error stack:', proofError.stack);
+      }
+      throw proofError;
+    }
 
     // Step 6: Validate proof size
     validateProofSize(proofData.proof);

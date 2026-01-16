@@ -5,12 +5,13 @@
  * Adapted for serverless environment - loads circuits via fetch.
  */
 
-import { UltraHonkBackend } from '@aztec/bb.js';
+import { Barretenberg, UltraHonkBackend } from '@aztec/bb.js';
 import { Noir } from '@noir-lang/noir_js';
 import type { CompiledCircuit } from '@noir-lang/types';
 import type { ProofType, VerificationResult } from './types';
 
 // Cache backends to avoid reinitialization (persists across warm invocations)
+const apiCache = new Map<ProofType, Barretenberg>();
 const backendCache = new Map<ProofType, UltraHonkBackend>();
 const noirCache = new Map<ProofType, Noir>();
 
@@ -77,11 +78,15 @@ async function getBackend(proofType: ProofType): Promise<{ noir: Noir; backend: 
   console.log(`[Verifier] Loading ${proofType} circuit...`);
   const circuit = await loadCircuitArtifact(proofType);
 
+  // Initialize Barretenberg API first
+  const api = await Barretenberg.new({ threads: 1 });
+
   // Initialize Noir and backend
   const noir = new Noir(circuit);
-  const backend = new UltraHonkBackend(circuit.bytecode);
+  const backend = new UltraHonkBackend(circuit.bytecode, api);
 
   // Cache for reuse
+  apiCache.set(proofType, api);
   noirCache.set(proofType, noir);
   backendCache.set(proofType, backend);
   circuitStatus[proofType] = true;

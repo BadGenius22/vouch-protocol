@@ -13,7 +13,7 @@
  */
 
 import { Noir } from '@noir-lang/noir_js';
-import { UltraHonkBackend } from '@aztec/bb.js';
+import { Barretenberg, UltraHonkBackend } from '@aztec/bb.js';
 import type { CompiledCircuit } from '@noir-lang/types';
 import { CircuitType, VouchError, VouchErrorCode } from './types';
 
@@ -42,6 +42,7 @@ const WASM_INIT_TIMEOUT = 30 * 1000;
 
 interface CachedCircuit {
   circuit: CompiledCircuit;
+  api: Barretenberg;
   backend: UltraHonkBackend;
   noir: Noir;
   loadedAt: number;
@@ -153,21 +154,33 @@ async function doLoadCircuit(circuitType: CircuitType): Promise<{
       );
     }
 
+    debugLog(` Initializing Barretenberg API...`);
+
+    // Initialize Barretenberg API (this loads WASM)
+    // Using single thread to avoid WASM fetch issues with SharedArrayBuffer/COEP
+    // This is slower but more compatible with browser security policies
+    const backendLogger = DEBUG
+      ? (msg: string) => console.log('[bb.js]', msg)
+      : undefined;
+
+    const api = await Barretenberg.new({
+      threads: 1,
+      logger: backendLogger,
+    });
+
     debugLog(` Initializing UltraHonk backend...`);
 
-    // Initialize UltraHonk backend from @aztec/bb.js (this loads WASM)
-    // Uses SharedArrayBuffer for multithreading if COOP/COEP headers are set
-    // UltraHonkBackend takes the bytecode directly, not the full circuit
-    const backend = new UltraHonkBackend(circuit.bytecode);
+    // Initialize UltraHonk backend from @aztec/bb.js
+    const backend = new UltraHonkBackend(circuit.bytecode, api);
 
     // Initialize Noir (takes full circuit for ABI parsing)
     const noir = new Noir(circuit);
 
-    // Destroy old cached backend to free WASM memory
+    // Destroy old cached API to free WASM memory
     const oldCached = circuitCache.get(circuitType);
     if (oldCached) {
       try {
-        await oldCached.backend.destroy();
+        await oldCached.api.destroy();
       } catch {
         // Ignore destruction errors
       }
@@ -176,6 +189,7 @@ async function doLoadCircuit(circuitType: CircuitType): Promise<{
     // Cache for reuse
     circuitCache.set(circuitType, {
       circuit,
+      api,
       backend,
       noir,
       loadedAt: Date.now(),
@@ -226,11 +240,11 @@ export async function preloadCircuits(): Promise<void> {
  * Useful for testing or when circuits are updated
  */
 export async function clearCircuitCache(): Promise<void> {
-  // Properly destroy backends to free WASM resources
+  // Properly destroy APIs to free WASM resources
   const entries = Array.from(circuitCache.values());
   for (const cached of entries) {
     try {
-      await cached.backend.destroy();
+      await cached.api.destroy();
     } catch {
       // Ignore errors during cleanup
     }
