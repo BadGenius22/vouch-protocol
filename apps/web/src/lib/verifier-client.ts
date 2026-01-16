@@ -12,14 +12,16 @@
  */
 
 import type { Connection, Transaction } from '@solana/web3.js';
-import { PublicKey, SystemProgram, TransactionInstruction } from '@solana/web3.js';
+import { PublicKey, SystemProgram, TransactionInstruction, Ed25519Program, SYSVAR_INSTRUCTIONS_PUBKEY } from '@solana/web3.js';
 import type { ProofResult, ProofType, VerificationResult } from './types';
 import { VouchError, VouchErrorCode } from './types';
 import {
   getVerifierProgram,
   deriveNullifierPDA,
+  deriveRateLimitPDA,
   buildComputeBudgetInstructions,
 } from './verify';
+import { buildAttestationMessage, getProofTypeValue } from './verifier/sign';
 
 // === Types ===
 
@@ -33,7 +35,10 @@ interface VerifierAttestation {
   };
   verifier: string;
   signature: string;
+  signatureBytes?: Uint8Array;
   attestationHash: string;
+  attestationHashBytes?: Uint8Array;
+  messageBytes?: Uint8Array;
 }
 
 interface VerifyResponse {
@@ -170,17 +175,42 @@ export async function verifyProofWithService(
 // === Anchor Instruction Builders ===
 
 /**
+ * Build the Ed25519 signature verification instruction
+ * This must be included in the transaction BEFORE record_attestation
+ */
+export function buildEd25519VerifyInstruction(
+  verifierPubkey: PublicKey,
+  signatureBytes: Uint8Array,
+  messageBytes: Uint8Array
+): TransactionInstruction {
+  return Ed25519Program.createInstructionWithPublicKey({
+    publicKey: verifierPubkey.toBytes(),
+    signature: signatureBytes,
+    message: messageBytes,
+  });
+}
+
+/**
  * Build the record_attestation instruction
  * This submits a verified attestation to the Solana program
+ *
+ * NOTE: Must be preceded by an Ed25519 verify instruction in the same transaction
  */
 export async function buildRecordAttestationInstruction(
   attestation: VerifierAttestation,
   nullifierPda: PublicKey,
   verifierPubkey: PublicKey,
   recipient: PublicKey,
-  payer: PublicKey
+  payer: PublicKey,
+  rateLimitPda: PublicKey
 ): Promise<TransactionInstruction> {
   const programId = getVerifierProgram();
+
+  // Derive config PDA
+  const [configPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from('config')],
+    programId
+  );
 
   // Derive verifier PDA
   const [verifierPda] = PublicKey.findProgramAddressSync(
@@ -199,30 +229,57 @@ export async function buildRecordAttestationInstruction(
   const attestationHashBytes = Buffer.from(attestation.attestationHash, 'hex');
   const proofTypeValue = attestation.result.proofType === 'developer' ? 1 : 2;
   const nullifierBytes = Buffer.from(attestation.result.nullifier, 'hex');
-  const signatureBytes = Buffer.from(attestation.signature, 'base64'); // Base58 decode
 
-  // Actually decode from base58
-  const bs58 = await import('bs58');
-  const signatureDecoded = bs58.default.decode(attestation.signature);
+  // Decode signature from base58
+  const bs58Module = await import('bs58');
+  const bs58Decode = bs58Module.default || bs58Module;
+  const signatureDecoded = attestation.signatureBytes ||
+    bs58Decode.decode(attestation.signature);
 
   const instructionData = Buffer.concat([
     Buffer.from(discriminator),
     attestationHashBytes,
     Buffer.from([proofTypeValue]),
     nullifierBytes,
-    signatureDecoded,
+    Buffer.from(signatureDecoded),
   ]);
 
+  // Account order must match RecordAttestation struct in lib.rs:
+  // 1. config
+  // 2. verifier_account
+  // 3. nullifier_account
+  // 4. rate_limit
+  // 5. recipient
+  // 6. payer
+  // 7. instructions_sysvar
   return new TransactionInstruction({
     keys: [
-      { pubkey: verifierPda, isSigner: false, isWritable: false },
+      { pubkey: configPda, isSigner: false, isWritable: true },
+      { pubkey: verifierPda, isSigner: false, isWritable: true },
       { pubkey: nullifierPda, isSigner: false, isWritable: true },
+      { pubkey: rateLimitPda, isSigner: false, isWritable: true },
       { pubkey: recipient, isSigner: false, isWritable: false },
       { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false },
     ],
     programId,
     data: instructionData,
   });
+}
+
+/**
+ * Reconstruct the message bytes for Ed25519 verification
+ * Used when message bytes aren't included in the API response
+ */
+function reconstructMessageBytes(attestation: VerifierAttestation): Uint8Array {
+  const proofTypeValue = getProofTypeValue(attestation.result.proofType);
+  const nullifierHex = attestation.result.nullifier.startsWith('0x')
+    ? attestation.result.nullifier.slice(2)
+    : attestation.result.nullifier;
+  const nullifierBytes = Buffer.from(nullifierHex, 'hex');
+  const attestationHashBytes = Buffer.from(attestation.attestationHash, 'hex');
+
+  return buildAttestationMessage(proofTypeValue, nullifierBytes, attestationHashBytes);
 }
 
 // === High-Level API ===
@@ -274,6 +331,7 @@ export async function submitProofWithVerifier(
     const [nullifierPda] = deriveNullifierPDA(proof.nullifier);
     const verifierPubkey = new PublicKey(attestation.verifier);
     const recipientPubkey = recipient || payer;
+    const [rateLimitPda] = deriveRateLimitPDA(recipientPubkey.toBase58());
 
     // Check if nullifier account exists
     const nullifierAccount = await connection.getAccountInfo(nullifierPda);
@@ -290,13 +348,31 @@ export async function submitProofWithVerifier(
       tx.add(initNullifierIx);
     }
 
-    // Add record attestation instruction
+    // Get or reconstruct the message bytes and signature bytes
+    const bs58Module = await import('bs58');
+    const bs58Decode = bs58Module.default || bs58Module;
+    const messageBytes = attestation.messageBytes ||
+      reconstructMessageBytes(attestation);
+    const signatureBytes = attestation.signatureBytes ||
+      bs58Decode.decode(attestation.signature);
+
+    // Add Ed25519 signature verification instruction FIRST
+    // This is required by the on-chain program which uses instruction introspection
+    const ed25519Ix = buildEd25519VerifyInstruction(
+      verifierPubkey,
+      signatureBytes,
+      messageBytes
+    );
+    tx.add(ed25519Ix);
+
+    // Add record attestation instruction (must come AFTER Ed25519 instruction)
     const recordAttestationIx = await buildRecordAttestationInstruction(
       attestation,
       nullifierPda,
       verifierPubkey,
       recipientPubkey,
-      payer
+      payer,
+      rateLimitPda
     );
     tx.add(recordAttestationIx);
 

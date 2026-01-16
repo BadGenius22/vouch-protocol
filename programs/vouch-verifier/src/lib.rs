@@ -1,6 +1,14 @@
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::ed25519_program;
+use anchor_lang::solana_program::sysvar::instructions::{
+    load_current_index_checked, load_instruction_at_checked,
+};
 
-declare_id!("CwWhTbquAFY5dvEMctwWHddWvdsDVAxWmtGPUt6s6UxQ");
+declare_id!("AgG8EAwpeWqjoJQBtUY5SHX38gYpsVhcG4x7UuRHwxk7");
+
+/// Ed25519 signature verification constants
+pub const ED25519_PUBKEY_SIZE: usize = 32;
+pub const ED25519_SIGNATURE_SIZE: usize = 64;
 
 /// Default rate limit: 10 proofs per day
 pub const DEFAULT_MAX_PROOFS_PER_DAY: u32 = 10;
@@ -227,10 +235,22 @@ pub mod vouch_verifier {
         let rate_limit = &mut ctx.accounts.rate_limit;
         check_and_update_rate_limit(rate_limit, config, now)?;
 
-        // Verify the signature (Ed25519)
-        // The signature is over: is_valid(1)|proof_type|nullifier|commitment|verified_at
-        // For simplicity in MVP, we trust the attestation if it's from an authorized verifier
-        // TODO: Add on-chain Ed25519 signature verification
+        // Build the attestation message that was signed
+        let message = build_attestation_message(
+            proof_type_value,
+            &nullifier,
+            &attestation_hash,
+        );
+
+        // Verify the Ed25519 signature using instruction introspection
+        // The transaction must include an Ed25519Program verify instruction
+        // immediately before this instruction
+        verify_ed25519_signature(
+            &ctx.accounts.instructions_sysvar.to_account_info(),
+            &verifier_account.verifier,
+            &signature,
+            &message,
+        )?;
 
         // Check nullifier hasn't been used
         let nullifier_account = &ctx.accounts.nullifier_account;
@@ -273,7 +293,7 @@ pub mod vouch_verifier {
         Ok(())
     }
 
-    // === Legacy Direct Verification (Placeholder) ===
+    // === Commitment & Nullifier Management ===
 
     /// Initialize a new commitment for a wallet
     /// The commitment = hash(wallet_pubkey + secret) is stored on-chain
@@ -293,7 +313,7 @@ pub mod vouch_verifier {
         Ok(())
     }
 
-    /// Initialize a nullifier account (must be called before verify)
+    /// Initialize a nullifier account (must be called before record_attestation)
     /// This separates account creation from verification for security
     pub fn init_nullifier(ctx: Context<InitNullifier>, nullifier: [u8; 32]) -> Result<()> {
         let nullifier_account = &mut ctx.accounts.nullifier_account;
@@ -306,106 +326,17 @@ pub mod vouch_verifier {
         Ok(())
     }
 
-    /// Verify a developer reputation proof (legacy - placeholder verification)
-    /// For production, use record_attestation with off-chain verifier
-    pub fn verify_dev_reputation(
-        ctx: Context<VerifyProofWithRateLimit>,
-        proof: Vec<u8>,
-        public_inputs: Vec<u8>,
-        min_tvl: u64,
-    ) -> Result<()> {
-        let config = &ctx.accounts.config;
-        let now = Clock::get()?.unix_timestamp;
-
-        // Check protocol is not paused
-        require!(!config.is_paused, VouchError::ProtocolPaused);
-
-        // 1. Verify proof structure (cryptographic verification via attestation)
-        require!(!proof.is_empty(), VouchError::InvalidProof);
-        require!(!public_inputs.is_empty(), VouchError::InvalidPublicInputs);
-        require!(proof.len() <= 4096, VouchError::ProofTooLarge);
-        require!(public_inputs.len() <= 1024, VouchError::PublicInputsTooLarge);
-
-        // 2. Check and update rate limits
-        let rate_limit = &mut ctx.accounts.rate_limit;
-        check_and_update_rate_limit(rate_limit, config, now)?;
-
-        // 3. Check nullifier hasn't been used
-        let nullifier_account = &ctx.accounts.nullifier_account;
-        require!(!nullifier_account.is_used, VouchError::NullifierAlreadyUsed);
-
-        // 4. Mark nullifier as used
-        let nullifier_account = &mut ctx.accounts.nullifier_account;
-        nullifier_account.is_used = true;
-        nullifier_account.used_at = now;
-        nullifier_account.proof_type = ProofType::DeveloperReputation;
-
-        // 5. Update global stats
-        let config = &mut ctx.accounts.config;
-        config.total_proofs_verified = config
-            .total_proofs_verified
-            .checked_add(1)
-            .ok_or(VouchError::Overflow)?;
-
-        emit!(ProofVerified {
-            nullifier: nullifier_account.nullifier,
-            proof_type: ProofType::DeveloperReputation,
-            min_threshold: min_tvl,
-            recipient: ctx.accounts.recipient.key(),
-            timestamp: nullifier_account.used_at,
-        });
-
-        Ok(())
-    }
-
-    /// Verify a whale trading proof (legacy - placeholder verification)
-    /// For production, use record_attestation with off-chain verifier
-    pub fn verify_whale_trading(
-        ctx: Context<VerifyProofWithRateLimit>,
-        proof: Vec<u8>,
-        public_inputs: Vec<u8>,
-        min_volume: u64,
-    ) -> Result<()> {
-        let config = &ctx.accounts.config;
-        let now = Clock::get()?.unix_timestamp;
-
-        // Check protocol is not paused
-        require!(!config.is_paused, VouchError::ProtocolPaused);
-
-        require!(!proof.is_empty(), VouchError::InvalidProof);
-        require!(!public_inputs.is_empty(), VouchError::InvalidPublicInputs);
-        require!(proof.len() <= 4096, VouchError::ProofTooLarge);
-        require!(public_inputs.len() <= 1024, VouchError::PublicInputsTooLarge);
-
-        // Check and update rate limits
-        let rate_limit = &mut ctx.accounts.rate_limit;
-        check_and_update_rate_limit(rate_limit, config, now)?;
-
-        let nullifier_account = &ctx.accounts.nullifier_account;
-        require!(!nullifier_account.is_used, VouchError::NullifierAlreadyUsed);
-
-        let nullifier_account = &mut ctx.accounts.nullifier_account;
-        nullifier_account.is_used = true;
-        nullifier_account.used_at = now;
-        nullifier_account.proof_type = ProofType::WhaleTrading;
-
-        // Update global stats
-        let config = &mut ctx.accounts.config;
-        config.total_proofs_verified = config
-            .total_proofs_verified
-            .checked_add(1)
-            .ok_or(VouchError::Overflow)?;
-
-        emit!(ProofVerified {
-            nullifier: nullifier_account.nullifier,
-            proof_type: ProofType::WhaleTrading,
-            min_threshold: min_volume,
-            recipient: ctx.accounts.recipient.key(),
-            timestamp: nullifier_account.used_at,
-        });
-
-        Ok(())
-    }
+    // NOTE: Direct on-chain proof verification instructions (verify_dev_reputation, verify_whale_trading)
+    // have been removed. UltraHonk proofs cannot be verified natively on Solana.
+    //
+    // For production use, the correct flow is:
+    // 1. Client generates UltraHonk proof in browser
+    // 2. Client sends proof to off-chain verifier service
+    // 3. Verifier cryptographically verifies proof and signs attestation
+    // 4. Client calls record_attestation with the signed attestation
+    // 5. On-chain program verifies Ed25519 signature and records result
+    //
+    // See: https://github.com/solana-foundation/noir-examples for Groth16 alternative
 }
 
 // === Helper Functions ===
@@ -446,6 +377,124 @@ fn check_and_update_rate_limit(
         .checked_add(1)
         .ok_or(VouchError::Overflow)?;
 
+    Ok(())
+}
+
+/// Build the attestation message that the verifier signs
+/// Format: "vouch_attestation" | proof_type (1 byte) | nullifier (32 bytes) | attestation_hash (32 bytes)
+pub fn build_attestation_message(
+    proof_type_value: u8,
+    nullifier: &[u8; 32],
+    attestation_hash: &[u8; 32],
+) -> [u8; 82] {
+    let mut message = [0u8; 82];
+    // Domain separator: "vouch_attestation" (17 bytes)
+    message[0..17].copy_from_slice(b"vouch_attestation");
+    // Proof type (1 byte)
+    message[17] = proof_type_value;
+    // Nullifier (32 bytes)
+    message[18..50].copy_from_slice(nullifier);
+    // Attestation hash (32 bytes)
+    message[50..82].copy_from_slice(attestation_hash);
+    message
+}
+
+/// Verify Ed25519 signature using instruction introspection
+/// This function checks that a valid Ed25519Program instruction was included
+/// in the transaction that verifies the signature over the attestation message
+pub fn verify_ed25519_signature(
+    instructions_sysvar: &AccountInfo,
+    verifier_pubkey: &Pubkey,
+    signature: &[u8; 64],
+    message: &[u8],
+) -> Result<()> {
+    // Get the current instruction index
+    let current_index = load_current_index_checked(instructions_sysvar)
+        .map_err(|_| VouchError::InvalidSignature)?;
+
+    // We expect the Ed25519 instruction to be right before this instruction
+    // (index = current_index - 1)
+    if current_index == 0 {
+        return Err(VouchError::InvalidSignature.into());
+    }
+
+    let ed25519_ix_index = current_index - 1;
+
+    // Load the Ed25519 instruction
+    let ed25519_ix = load_instruction_at_checked(ed25519_ix_index as usize, instructions_sysvar)
+        .map_err(|_| VouchError::InvalidSignature)?;
+
+    // Verify it's an Ed25519 program instruction
+    if ed25519_ix.program_id != ed25519_program::ID {
+        return Err(VouchError::InvalidSignature.into());
+    }
+
+    // Parse and verify the Ed25519 instruction data
+    // Ed25519 instruction format:
+    // - 1 byte: number of signatures
+    // - 1 byte: padding
+    // For each signature:
+    // - 2 bytes: signature offset
+    // - 2 bytes: signature instruction index
+    // - 2 bytes: public key offset
+    // - 2 bytes: public key instruction index
+    // - 2 bytes: message data offset
+    // - 2 bytes: message data size
+    // - 2 bytes: message instruction index
+    // Then the actual data (signature, pubkey, message)
+
+    let ix_data = &ed25519_ix.data;
+
+    if ix_data.len() < 2 {
+        return Err(VouchError::InvalidSignature.into());
+    }
+
+    let num_signatures = ix_data[0];
+    if num_signatures != 1 {
+        return Err(VouchError::InvalidSignature.into());
+    }
+
+    // Parse offsets (bytes 2-15)
+    if ix_data.len() < 16 {
+        return Err(VouchError::InvalidSignature.into());
+    }
+
+    let sig_offset = u16::from_le_bytes([ix_data[2], ix_data[3]]) as usize;
+    let pubkey_offset = u16::from_le_bytes([ix_data[6], ix_data[7]]) as usize;
+    let msg_offset = u16::from_le_bytes([ix_data[10], ix_data[11]]) as usize;
+    let msg_size = u16::from_le_bytes([ix_data[12], ix_data[13]]) as usize;
+
+    // Verify the instruction contains the expected data at the specified offsets
+    if ix_data.len() < sig_offset + ED25519_SIGNATURE_SIZE {
+        return Err(VouchError::InvalidSignature.into());
+    }
+    if ix_data.len() < pubkey_offset + ED25519_PUBKEY_SIZE {
+        return Err(VouchError::InvalidSignature.into());
+    }
+    if ix_data.len() < msg_offset + msg_size {
+        return Err(VouchError::InvalidSignature.into());
+    }
+
+    // Extract and verify signature matches
+    let ix_signature = &ix_data[sig_offset..sig_offset + ED25519_SIGNATURE_SIZE];
+    if ix_signature != signature.as_slice() {
+        return Err(VouchError::InvalidSignature.into());
+    }
+
+    // Extract and verify public key matches the verifier
+    let ix_pubkey = &ix_data[pubkey_offset..pubkey_offset + ED25519_PUBKEY_SIZE];
+    if ix_pubkey != verifier_pubkey.as_ref() {
+        return Err(VouchError::InvalidSignature.into());
+    }
+
+    // Extract and verify message matches
+    let ix_message = &ix_data[msg_offset..msg_offset + msg_size];
+    if ix_message != message {
+        return Err(VouchError::InvalidSignature.into());
+    }
+
+    // If we get here, the Ed25519 program has verified the signature is valid
+    // for the given public key and message
     Ok(())
 }
 
@@ -590,6 +639,11 @@ pub struct RecordAttestation<'info> {
 
     #[account(mut)]
     pub payer: Signer<'info>,
+
+    /// Instructions sysvar for Ed25519 signature verification
+    /// CHECK: This is the instructions sysvar
+    #[account(address = anchor_lang::solana_program::sysvar::instructions::ID)]
+    pub instructions_sysvar: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
@@ -628,54 +682,6 @@ pub struct InitNullifier<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// Legacy verify proof context (without rate limiting)
-/// Kept for backward compatibility but deprecated
-#[derive(Accounts)]
-pub struct VerifyProof<'info> {
-    #[account(
-        mut,
-        constraint = !nullifier_account.is_used @ VouchError::NullifierAlreadyUsed
-    )]
-    pub nullifier_account: Account<'info, NullifierAccount>,
-
-    /// The wallet receiving the credential (can be a burner wallet)
-    /// CHECK: This is the recipient of the credential NFT
-    pub recipient: UncheckedAccount<'info>,
-
-    #[account(mut)]
-    pub payer: Signer<'info>,
-}
-
-/// Verify proof context with rate limiting and pause checks
-#[derive(Accounts)]
-pub struct VerifyProofWithRateLimit<'info> {
-    #[account(
-        mut,
-        seeds = [b"config"],
-        bump = config.bump
-    )]
-    pub config: Account<'info, ConfigAccount>,
-
-    #[account(
-        mut,
-        constraint = !nullifier_account.is_used @ VouchError::NullifierAlreadyUsed
-    )]
-    pub nullifier_account: Account<'info, NullifierAccount>,
-
-    #[account(
-        mut,
-        seeds = [b"rate_limit", recipient.key().as_ref()],
-        bump = rate_limit.bump
-    )]
-    pub rate_limit: Account<'info, WalletRateLimit>,
-
-    /// The wallet receiving the credential (can be a burner wallet)
-    /// CHECK: This is the recipient of the credential NFT
-    pub recipient: UncheckedAccount<'info>,
-
-    #[account(mut)]
-    pub payer: Signer<'info>,
-}
 
 // === State ===
 
@@ -832,25 +838,10 @@ pub struct CommitmentCreated {
     pub timestamp: i64,
 }
 
-#[event]
-pub struct ProofVerified {
-    pub nullifier: [u8; 32],
-    pub proof_type: ProofType,
-    pub min_threshold: u64,
-    pub recipient: Pubkey,
-    pub timestamp: i64,
-}
-
 // === Errors ===
 
 #[error_code]
 pub enum VouchError {
-    #[msg("Invalid proof")]
-    InvalidProof,
-
-    #[msg("Invalid public inputs")]
-    InvalidPublicInputs,
-
     #[msg("Invalid proof type")]
     InvalidProofType,
 
@@ -894,10 +885,4 @@ pub enum VouchError {
 
     #[msg("Arithmetic overflow")]
     Overflow,
-
-    #[msg("Proof data too large")]
-    ProofTooLarge,
-
-    #[msg("Public inputs data too large")]
-    PublicInputsTooLarge,
 }

@@ -55,6 +55,7 @@ const DEFAULT_PROGRAM_ID = 'CwWhTbquAFY5dvEMctwWHddWvdsDVAxWmtGPUt6s6UxQ';
 /** PDA seeds */
 const NULLIFIER_SEED = 'nullifier';
 const COMMITMENT_SEED = 'commitment';
+const RATE_LIMIT_SEED = 'rate_limit';
 
 /** Compute budget settings for ZK proof verification */
 const COMPUTE_UNIT_LIMIT = 400_000; // ZK verification is compute-intensive
@@ -176,6 +177,33 @@ export function deriveCommitmentPDA(commitment: string): [PublicKey, number] {
     [Buffer.from(COMMITMENT_SEED), commitmentBytes],
     programId
   );
+}
+
+/**
+ * Derive the PDA for a wallet's rate limit account
+ *
+ * Rate limit accounts track per-wallet proof submission limits
+ * and cooldown periods.
+ *
+ * @param wallet - The wallet address (base58 string)
+ * @returns [PDA address, bump seed]
+ * @throws VouchError if wallet format is invalid
+ */
+export function deriveRateLimitPDA(wallet: string): [PublicKey, number] {
+  try {
+    const programId = getVerifierProgram();
+    const walletPubkey = new PublicKey(wallet);
+
+    return PublicKey.findProgramAddressSync(
+      [Buffer.from(RATE_LIMIT_SEED), walletPubkey.toBuffer()],
+      programId
+    );
+  } catch {
+    throw new VouchError(
+      'Invalid wallet address format',
+      VouchErrorCode.INSUFFICIENT_DATA
+    );
+  }
 }
 
 // === Nullifier Status ===

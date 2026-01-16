@@ -9,12 +9,14 @@
  * - Admin controls (pause/unpause)
  * - Rate limiting
  * - Verifier management
- * - Attestation recording
+ * - Attestation recording (production flow with Ed25519 signature verification)
  * - Commitment creation
  * - Nullifier handling
- * - Dev reputation verification
- * - Whale trading verification
  * - Error cases and edge cases
+ *
+ * NOTE: Direct on-chain proof verification (verify_dev_reputation, verify_whale_trading)
+ * has been removed. UltraHonk proofs cannot be verified natively on Solana.
+ * Use record_attestation with off-chain verifier for production.
  */
 
 import * as anchor from '@coral-xyz/anchor';
@@ -35,8 +37,6 @@ describe('vouch-verifier', () => {
 
   // Test data
   const testCommitment = new Uint8Array(32).fill(1);
-  const testProof = new Uint8Array(256).fill(3);
-  const testPublicInputs = new Uint8Array(64).fill(4);
 
   // Helper to generate random bytes
   function randomBytes(length: number): Uint8Array {
@@ -106,25 +106,6 @@ describe('vouch-verifier', () => {
         })
         .rpc();
     }
-  }
-
-  // Helper to setup rate limit for a wallet
-  async function ensureRateLimitInitialized(wallet: PublicKey): Promise<PublicKey> {
-    const rateLimitPda = getRateLimitPda(wallet);
-    try {
-      await program.account.walletRateLimit.fetch(rateLimitPda);
-    } catch {
-      await program.methods
-        .initRateLimit()
-        .accounts({
-          rateLimit: rateLimitPda,
-          wallet: wallet,
-          payer: admin.publicKey,
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
-    }
-    return rateLimitPda;
   }
 
   before(async () => {
@@ -668,510 +649,6 @@ describe('vouch-verifier', () => {
   });
 
   // ==========================================
-  // Dev Reputation Verification Tests
-  // ==========================================
-
-  describe('verify_dev_reputation', () => {
-    let recipient: Keypair;
-    let uniqueNullifier: Uint8Array;
-    let nullifierPda: PublicKey;
-    let rateLimitPda: PublicKey;
-
-    beforeEach(async () => {
-      // Generate unique recipient and nullifier
-      recipient = Keypair.generate();
-      uniqueNullifier = randomBytes(32);
-      nullifierPda = getNullifierPda(uniqueNullifier);
-
-      // Ensure rate limit is initialized for recipient
-      rateLimitPda = await ensureRateLimitInitialized(recipient.publicKey);
-
-      // Initialize nullifier account
-      await program.methods
-        .initNullifier(Array.from(uniqueNullifier) as number[] & { length: 32 })
-        .accounts({
-          nullifierAccount: nullifierPda,
-          payer: admin.publicKey,
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
-
-      // Ensure protocol is not paused and rate limits are permissive
-      const config = await program.account.configAccount.fetch(configPda);
-      if (config.isPaused) {
-        await program.methods
-          .unpauseProtocol()
-          .accounts({
-            config: configPda,
-            admin: admin.publicKey,
-          })
-          .rpc();
-      }
-
-      // Set permissive rate limits for testing
-      await program.methods
-        .updateRateLimits(100, new anchor.BN(0))
-        .accounts({
-          config: configPda,
-          admin: admin.publicKey,
-        })
-        .rpc();
-    });
-
-    it('should verify a valid developer reputation proof', async () => {
-      await program.methods
-        .verifyDevReputation(
-          Buffer.from(testProof),
-          Buffer.from(testPublicInputs),
-          new anchor.BN(100000)
-        )
-        .accounts({
-          config: configPda,
-          nullifierAccount: nullifierPda,
-          rateLimit: rateLimitPda,
-          recipient: recipient.publicKey,
-          payer: admin.publicKey,
-        })
-        .rpc();
-
-      const account = await program.account.nullifierAccount.fetch(nullifierPda);
-      expect(account.isUsed).to.be.true;
-      expect(account.proofType).to.deep.equal({ developerReputation: {} });
-      expect(account.usedAt.toNumber()).to.be.greaterThan(0);
-    });
-
-    it('should reject reused nullifier', async () => {
-      // First verification
-      await program.methods
-        .verifyDevReputation(
-          Buffer.from(testProof),
-          Buffer.from(testPublicInputs),
-          new anchor.BN(100000)
-        )
-        .accounts({
-          config: configPda,
-          nullifierAccount: nullifierPda,
-          rateLimit: rateLimitPda,
-          recipient: recipient.publicKey,
-          payer: admin.publicKey,
-        })
-        .rpc();
-
-      // Second verification should fail
-      try {
-        await program.methods
-          .verifyDevReputation(
-            Buffer.from(testProof),
-            Buffer.from(testPublicInputs),
-            new anchor.BN(100000)
-          )
-          .accounts({
-            config: configPda,
-            nullifierAccount: nullifierPda,
-            rateLimit: rateLimitPda,
-            recipient: recipient.publicKey,
-            payer: admin.publicKey,
-          })
-          .rpc();
-        expect.fail('Should have thrown NullifierAlreadyUsed error');
-      } catch (error) {
-        expect(error.toString()).to.include('NullifierAlreadyUsed');
-      }
-    });
-
-    it('should reject empty proof', async () => {
-      try {
-        await program.methods
-          .verifyDevReputation(
-            Buffer.from([]),
-            Buffer.from(testPublicInputs),
-            new anchor.BN(100000)
-          )
-          .accounts({
-            config: configPda,
-            nullifierAccount: nullifierPda,
-            rateLimit: rateLimitPda,
-            recipient: recipient.publicKey,
-            payer: admin.publicKey,
-          })
-          .rpc();
-        expect.fail('Should have thrown InvalidProof error');
-      } catch (error) {
-        expect(error.toString()).to.include('InvalidProof');
-      }
-    });
-
-    it('should reject empty public inputs', async () => {
-      try {
-        await program.methods
-          .verifyDevReputation(
-            Buffer.from(testProof),
-            Buffer.from([]),
-            new anchor.BN(100000)
-          )
-          .accounts({
-            config: configPda,
-            nullifierAccount: nullifierPda,
-            rateLimit: rateLimitPda,
-            recipient: recipient.publicKey,
-            payer: admin.publicKey,
-          })
-          .rpc();
-        expect.fail('Should have thrown InvalidPublicInputs error');
-      } catch (error) {
-        expect(error.toString()).to.include('InvalidPublicInputs');
-      }
-    });
-
-    it('should reject proof that is too large', async () => {
-      const largeProof = new Uint8Array(5000); // > 4096 bytes
-      try {
-        await program.methods
-          .verifyDevReputation(
-            Buffer.from(largeProof),
-            Buffer.from(testPublicInputs),
-            new anchor.BN(100000)
-          )
-          .accounts({
-            config: configPda,
-            nullifierAccount: nullifierPda,
-            rateLimit: rateLimitPda,
-            recipient: recipient.publicKey,
-            payer: admin.publicKey,
-          })
-          .rpc();
-        expect.fail('Should have thrown ProofTooLarge error');
-      } catch (error) {
-        expect(error.toString()).to.include('ProofTooLarge');
-      }
-    });
-
-    it('should reject when protocol is paused', async () => {
-      // Pause the protocol
-      await program.methods
-        .pauseProtocol()
-        .accounts({
-          config: configPda,
-          admin: admin.publicKey,
-        })
-        .rpc();
-
-      try {
-        await program.methods
-          .verifyDevReputation(
-            Buffer.from(testProof),
-            Buffer.from(testPublicInputs),
-            new anchor.BN(100000)
-          )
-          .accounts({
-            config: configPda,
-            nullifierAccount: nullifierPda,
-            rateLimit: rateLimitPda,
-            recipient: recipient.publicKey,
-            payer: admin.publicKey,
-          })
-          .rpc();
-        expect.fail('Should have thrown ProtocolPaused error');
-      } catch (error) {
-        expect(error.toString()).to.include('ProtocolPaused');
-      }
-
-      // Unpause for other tests
-      await program.methods
-        .unpauseProtocol()
-        .accounts({
-          config: configPda,
-          admin: admin.publicKey,
-        })
-        .rpc();
-    });
-
-    it('should update rate limit counters after verification', async () => {
-      const beforeRateLimit = await program.account.walletRateLimit.fetch(rateLimitPda);
-      const beforeProofsToday = beforeRateLimit.proofsToday;
-
-      await program.methods
-        .verifyDevReputation(
-          Buffer.from(testProof),
-          Buffer.from(testPublicInputs),
-          new anchor.BN(100000)
-        )
-        .accounts({
-          config: configPda,
-          nullifierAccount: nullifierPda,
-          rateLimit: rateLimitPda,
-          recipient: recipient.publicKey,
-          payer: admin.publicKey,
-        })
-        .rpc();
-
-      const afterRateLimit = await program.account.walletRateLimit.fetch(rateLimitPda);
-      expect(afterRateLimit.proofsToday).to.equal(beforeProofsToday + 1);
-      expect(afterRateLimit.lastProofAt.toNumber()).to.be.greaterThan(0);
-    });
-
-    it('should increment total proofs verified', async () => {
-      const beforeConfig = await program.account.configAccount.fetch(configPda);
-      const beforeTotal = beforeConfig.totalProofsVerified.toNumber();
-
-      await program.methods
-        .verifyDevReputation(
-          Buffer.from(testProof),
-          Buffer.from(testPublicInputs),
-          new anchor.BN(100000)
-        )
-        .accounts({
-          config: configPda,
-          nullifierAccount: nullifierPda,
-          rateLimit: rateLimitPda,
-          recipient: recipient.publicKey,
-          payer: admin.publicKey,
-        })
-        .rpc();
-
-      const afterConfig = await program.account.configAccount.fetch(configPda);
-      expect(afterConfig.totalProofsVerified.toNumber()).to.equal(beforeTotal + 1);
-    });
-  });
-
-  // ==========================================
-  // Whale Trading Verification Tests
-  // ==========================================
-
-  describe('verify_whale_trading', () => {
-    let recipient: Keypair;
-    let uniqueNullifier: Uint8Array;
-    let nullifierPda: PublicKey;
-    let rateLimitPda: PublicKey;
-
-    beforeEach(async () => {
-      recipient = Keypair.generate();
-      uniqueNullifier = randomBytes(32);
-      nullifierPda = getNullifierPda(uniqueNullifier);
-
-      // Ensure rate limit is initialized for recipient
-      rateLimitPda = await ensureRateLimitInitialized(recipient.publicKey);
-
-      await program.methods
-        .initNullifier(Array.from(uniqueNullifier) as number[] & { length: 32 })
-        .accounts({
-          nullifierAccount: nullifierPda,
-          payer: admin.publicKey,
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
-
-      // Ensure permissive rate limits
-      await program.methods
-        .updateRateLimits(100, new anchor.BN(0))
-        .accounts({
-          config: configPda,
-          admin: admin.publicKey,
-        })
-        .rpc();
-    });
-
-    it('should verify a valid whale trading proof', async () => {
-      await program.methods
-        .verifyWhaleTrading(
-          Buffer.from(testProof),
-          Buffer.from(testPublicInputs),
-          new anchor.BN(50000)
-        )
-        .accounts({
-          config: configPda,
-          nullifierAccount: nullifierPda,
-          rateLimit: rateLimitPda,
-          recipient: recipient.publicKey,
-          payer: admin.publicKey,
-        })
-        .rpc();
-
-      const account = await program.account.nullifierAccount.fetch(nullifierPda);
-      expect(account.isUsed).to.be.true;
-      expect(account.proofType).to.deep.equal({ whaleTrading: {} });
-    });
-
-    it('should reject reused nullifier for whale trading', async () => {
-      await program.methods
-        .verifyWhaleTrading(
-          Buffer.from(testProof),
-          Buffer.from(testPublicInputs),
-          new anchor.BN(50000)
-        )
-        .accounts({
-          config: configPda,
-          nullifierAccount: nullifierPda,
-          rateLimit: rateLimitPda,
-          recipient: recipient.publicKey,
-          payer: admin.publicKey,
-        })
-        .rpc();
-
-      try {
-        await program.methods
-          .verifyWhaleTrading(
-            Buffer.from(testProof),
-            Buffer.from(testPublicInputs),
-            new anchor.BN(50000)
-          )
-          .accounts({
-            config: configPda,
-            nullifierAccount: nullifierPda,
-            rateLimit: rateLimitPda,
-            recipient: recipient.publicKey,
-            payer: admin.publicKey,
-          })
-          .rpc();
-        expect.fail('Should have thrown NullifierAlreadyUsed error');
-      } catch (error) {
-        expect(error.toString()).to.include('NullifierAlreadyUsed');
-      }
-    });
-
-    it('should allow different proof types with different nullifiers', async () => {
-      // First: whale trading proof
-      await program.methods
-        .verifyWhaleTrading(
-          Buffer.from(testProof),
-          Buffer.from(testPublicInputs),
-          new anchor.BN(50000)
-        )
-        .accounts({
-          config: configPda,
-          nullifierAccount: nullifierPda,
-          rateLimit: rateLimitPda,
-          recipient: recipient.publicKey,
-          payer: admin.publicKey,
-        })
-        .rpc();
-
-      // Create new nullifier for dev reputation
-      const devNullifier = randomBytes(32);
-      const devNullifierPda = getNullifierPda(devNullifier);
-
-      await program.methods
-        .initNullifier(Array.from(devNullifier) as number[] & { length: 32 })
-        .accounts({
-          nullifierAccount: devNullifierPda,
-          payer: admin.publicKey,
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
-
-      // Second: dev reputation proof with different nullifier
-      await program.methods
-        .verifyDevReputation(
-          Buffer.from(testProof),
-          Buffer.from(testPublicInputs),
-          new anchor.BN(100000)
-        )
-        .accounts({
-          config: configPda,
-          nullifierAccount: devNullifierPda,
-          rateLimit: rateLimitPda,
-          recipient: recipient.publicKey,
-          payer: admin.publicKey,
-        })
-        .rpc();
-
-      const whaleAccount = await program.account.nullifierAccount.fetch(nullifierPda);
-      const devAccount = await program.account.nullifierAccount.fetch(devNullifierPda);
-
-      expect(whaleAccount.proofType).to.deep.equal({ whaleTrading: {} });
-      expect(devAccount.proofType).to.deep.equal({ developerReputation: {} });
-    });
-  });
-
-  // ==========================================
-  // Rate Limit Enforcement Tests
-  // ==========================================
-
-  describe('rate_limit_enforcement', () => {
-    it('should enforce daily rate limit', async () => {
-      const recipient = Keypair.generate();
-      const rateLimitPda = await ensureRateLimitInitialized(recipient.publicKey);
-
-      // Set strict rate limit (1 proof per day, 0 cooldown)
-      await program.methods
-        .updateRateLimits(1, new anchor.BN(0))
-        .accounts({
-          config: configPda,
-          admin: admin.publicKey,
-        })
-        .rpc();
-
-      // First proof should succeed
-      const nullifier1 = randomBytes(32);
-      const nullifierPda1 = getNullifierPda(nullifier1);
-      await program.methods
-        .initNullifier(Array.from(nullifier1) as number[] & { length: 32 })
-        .accounts({
-          nullifierAccount: nullifierPda1,
-          payer: admin.publicKey,
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
-
-      await program.methods
-        .verifyDevReputation(
-          Buffer.from(testProof),
-          Buffer.from(testPublicInputs),
-          new anchor.BN(100000)
-        )
-        .accounts({
-          config: configPda,
-          nullifierAccount: nullifierPda1,
-          rateLimit: rateLimitPda,
-          recipient: recipient.publicKey,
-          payer: admin.publicKey,
-        })
-        .rpc();
-
-      // Second proof should fail due to daily limit
-      const nullifier2 = randomBytes(32);
-      const nullifierPda2 = getNullifierPda(nullifier2);
-      await program.methods
-        .initNullifier(Array.from(nullifier2) as number[] & { length: 32 })
-        .accounts({
-          nullifierAccount: nullifierPda2,
-          payer: admin.publicKey,
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
-
-      try {
-        await program.methods
-          .verifyDevReputation(
-            Buffer.from(testProof),
-            Buffer.from(testPublicInputs),
-            new anchor.BN(100000)
-          )
-          .accounts({
-            config: configPda,
-            nullifierAccount: nullifierPda2,
-            rateLimit: rateLimitPda,
-            recipient: recipient.publicKey,
-            payer: admin.publicKey,
-          })
-          .rpc();
-        expect.fail('Should have thrown DailyRateLimitExceeded error');
-      } catch (error) {
-        expect(error.toString()).to.include('DailyRateLimitExceeded');
-      }
-
-      // Reset rate limits for other tests
-      await program.methods
-        .updateRateLimits(100, new anchor.BN(0))
-        .accounts({
-          config: configPda,
-          admin: admin.publicKey,
-        })
-        .rpc();
-    });
-  });
-
-  // ==========================================
   // Event Tests
   // ==========================================
 
@@ -1181,34 +658,17 @@ describe('vouch-verifier', () => {
       // and can be verified via transaction logs
     });
 
-    it('should emit ProofVerified event', async () => {
-      const recipient = Keypair.generate();
-      const rateLimitPda = await ensureRateLimitInitialized(recipient.publicKey);
-      const uniqueNullifier = randomBytes(32);
-      const nullifierPda = getNullifierPda(uniqueNullifier);
-
-      await program.methods
-        .initNullifier(Array.from(uniqueNullifier) as number[] & { length: 32 })
-        .accounts({
-          nullifierAccount: nullifierPda,
-          payer: admin.publicKey,
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
+    it('should emit CommitmentCreated event', async () => {
+      const uniqueCommitment = randomBytes(32);
+      const commitmentPda = getCommitmentPda(uniqueCommitment);
 
       // Events are emitted on chain, verification via transaction logs
       const tx = await program.methods
-        .verifyDevReputation(
-          Buffer.from(testProof),
-          Buffer.from(testPublicInputs),
-          new anchor.BN(100000)
-        )
+        .createCommitment(Array.from(uniqueCommitment) as number[] & { length: 32 })
         .accounts({
-          config: configPda,
-          nullifierAccount: nullifierPda,
-          rateLimit: rateLimitPda,
-          recipient: recipient.publicKey,
-          payer: admin.publicKey,
+          commitmentAccount: commitmentPda,
+          owner: admin.publicKey,
+          systemProgram: SystemProgram.programId,
         })
         .rpc();
 
@@ -1216,4 +676,18 @@ describe('vouch-verifier', () => {
       expect(tx).to.be.a('string');
     });
   });
+
+  // ==========================================
+  // Note: Direct Proof Verification Removed
+  // ==========================================
+  //
+  // The verify_dev_reputation and verify_whale_trading instructions have been
+  // removed because UltraHonk proofs cannot be verified natively on Solana.
+  //
+  // For production use, proofs should be:
+  // 1. Generated client-side (browser) using UltraHonk
+  // 2. Verified by an off-chain verifier service
+  // 3. Recorded on-chain via record_attestation with Ed25519 signature verification
+  //
+  // See: https://github.com/solana-foundation/noir-examples for Groth16 alternative
 });

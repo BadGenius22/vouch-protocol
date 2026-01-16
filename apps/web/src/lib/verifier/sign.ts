@@ -65,71 +65,150 @@ export function getVerifierPublicKey(): string {
 }
 
 /**
+ * Domain separator for attestation messages
+ * Must match the on-chain constant in lib.rs
+ */
+const ATTESTATION_DOMAIN = 'vouch_attestation';
+
+/**
+ * Proof type values (must match on-chain ProofType enum)
+ */
+const PROOF_TYPE_VALUES: Record<string, number> = {
+  developer: 1,
+  whale: 2,
+};
+
+/**
  * Create a signed attestation from a verification result
  *
  * The attestation includes:
  * - The verification result
  * - Verifier's public key
- * - Ed25519 signature
- * - Hash for on-chain storage
+ * - Ed25519 signature (raw bytes as Uint8Array)
+ * - Attestation hash
+ * - Message bytes (for Ed25519 instruction)
  */
 export function signAttestation(result: VerificationResult): SignedAttestation {
   if (!verifierKeypair) {
     initializeVerifier();
   }
 
-  // Create message to sign
-  // Format: isValid|proofType|nullifier|commitment|verifiedAt
-  const message = createAttestationMessage(result);
-  const messageBytes = new TextEncoder().encode(message);
-
-  // Sign with Ed25519 using nacl (bundled with @solana/web3.js)
-  const nacl = require('tweetnacl');
-  const signature = nacl.sign.detached(messageBytes, verifierKeypair!.secretKey);
-
-  // Create attestation hash (for on-chain storage)
+  const bs58 = require('bs58');
   const crypto = require('crypto');
-  const attestationHash = crypto
-    .createHash('sha256')
-    .update(messageBytes)
-    .digest('hex');
-
-  // Encode signature as base58
-  const bs58 = require('bs58');
-
-  return {
-    result,
-    verifier: verifierKeypair!.publicKey.toBase58(),
-    signature: bs58.encode(signature),
-    attestationHash,
-  };
-}
-
-/**
- * Verify an attestation signature (for testing)
- */
-export function verifyAttestationSignature(attestation: SignedAttestation): boolean {
-  const message = createAttestationMessage(attestation.result);
-  const messageBytes = new TextEncoder().encode(message);
-
   const nacl = require('tweetnacl');
-  const bs58 = require('bs58');
 
-  const signature = bs58.decode(attestation.signature);
-  const publicKey = bs58.decode(attestation.verifier);
+  // Get proof type value
+  const proofTypeValue = PROOF_TYPE_VALUES[result.proofType] || 0;
 
-  return nacl.sign.detached.verify(messageBytes, signature, publicKey);
-}
+  // Decode nullifier from hex to bytes
+  const nullifierHex = result.nullifier.startsWith('0x')
+    ? result.nullifier.slice(2)
+    : result.nullifier;
+  const nullifierBytes = Buffer.from(nullifierHex, 'hex');
 
-/**
- * Create the message string for signing
- */
-function createAttestationMessage(result: VerificationResult): string {
-  return [
+  // Create attestation hash from the original result data
+  // This is used for on-chain storage and reference
+  const originalMessage = [
     result.isValid ? '1' : '0',
     result.proofType,
     result.nullifier,
     result.commitment,
     result.verifiedAt.toString(),
   ].join('|');
+  const attestationHash = crypto
+    .createHash('sha256')
+    .update(originalMessage)
+    .digest();
+
+  // Build the binary message for signing
+  // Format: "vouch_attestation" (17 bytes) | proof_type (1 byte) | nullifier (32 bytes) | attestation_hash (32 bytes)
+  // Total: 82 bytes
+  const messageBytes = buildAttestationMessage(
+    proofTypeValue,
+    nullifierBytes,
+    attestationHash
+  );
+
+  // Sign with Ed25519 using nacl
+  const signatureBytes = nacl.sign.detached(messageBytes, verifierKeypair!.secretKey);
+
+  return {
+    result,
+    verifier: verifierKeypair!.publicKey.toBase58(),
+    signature: bs58.encode(signatureBytes),
+    signatureBytes: signatureBytes,
+    attestationHash: attestationHash.toString('hex'),
+    attestationHashBytes: attestationHash,
+    messageBytes: messageBytes,
+  };
+}
+
+/**
+ * Build the attestation message in binary format
+ * Must match the on-chain build_attestation_message function
+ *
+ * Format: "vouch_attestation" (17 bytes) | proof_type (1 byte) | nullifier (32 bytes) | attestation_hash (32 bytes)
+ */
+export function buildAttestationMessage(
+  proofTypeValue: number,
+  nullifier: Uint8Array,
+  attestationHash: Uint8Array
+): Uint8Array {
+  const message = new Uint8Array(82);
+
+  // Domain separator: "vouch_attestation" (17 bytes)
+  const domain = new TextEncoder().encode(ATTESTATION_DOMAIN);
+  message.set(domain, 0);
+
+  // Proof type (1 byte)
+  message[17] = proofTypeValue;
+
+  // Nullifier (32 bytes)
+  message.set(nullifier.slice(0, 32), 18);
+
+  // Attestation hash (32 bytes)
+  message.set(attestationHash.slice(0, 32), 50);
+
+  return message;
+}
+
+/**
+ * Verify an attestation signature (for testing)
+ */
+export function verifyAttestationSignature(attestation: SignedAttestation): boolean {
+  const nacl = require('tweetnacl');
+  const bs58 = require('bs58');
+
+  // Use the stored messageBytes if available, otherwise rebuild
+  let messageBytes: Uint8Array;
+  if (attestation.messageBytes) {
+    messageBytes = attestation.messageBytes;
+  } else {
+    // Rebuild message from result
+    const proofTypeValue = PROOF_TYPE_VALUES[attestation.result.proofType] || 0;
+    const nullifierHex = attestation.result.nullifier.startsWith('0x')
+      ? attestation.result.nullifier.slice(2)
+      : attestation.result.nullifier;
+    const nullifierBytes = Buffer.from(nullifierHex, 'hex');
+    const attestationHashBytes = attestation.attestationHashBytes ||
+      Buffer.from(attestation.attestationHash, 'hex');
+
+    messageBytes = buildAttestationMessage(
+      proofTypeValue,
+      nullifierBytes,
+      attestationHashBytes
+    );
+  }
+
+  const signature = attestation.signatureBytes || bs58.decode(attestation.signature);
+  const publicKey = bs58.decode(attestation.verifier);
+
+  return nacl.sign.detached.verify(messageBytes, signature, publicKey);
+}
+
+/**
+ * Get the proof type value from string
+ */
+export function getProofTypeValue(proofType: string): number {
+  return PROOF_TYPE_VALUES[proofType] || 0;
 }
