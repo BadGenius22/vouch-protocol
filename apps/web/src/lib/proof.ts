@@ -22,6 +22,7 @@ import type { InputMap } from '@noir-lang/noirc_abi';
 import { loadCircuit } from './circuit';
 import {
   CIRCUIT_CONSTANTS,
+  SECURITY_CONSTANTS,
   DevReputationInput,
   WhaleTradingInput,
   ProofResult,
@@ -30,6 +31,7 @@ import {
   VouchError,
   VouchErrorCode,
 } from './types';
+import { calculateProofExpiration, validateProofSize, validatePublicInputsSize } from './security';
 
 // === Debug Mode ===
 const DEBUG = process.env.NODE_ENV === 'development';
@@ -495,7 +497,16 @@ export async function generateDevReputationProof(
     updateProgress('generating', 70, 'Generating ZK proof (this may take a moment)...');
     const proofData = await backend.generateProof(witness);
 
-    // Step 6: Complete
+    // Step 6: Validate proof size
+    validateProofSize(proofData.proof);
+    validatePublicInputsSize(proofData.publicInputs);
+
+    // Step 7: Calculate TTL
+    const { generatedAt, expiresAt } = calculateProofExpiration(
+      SECURITY_CONSTANTS.DEFAULT_PROOF_TTL_MS
+    );
+
+    // Step 8: Complete
     updateProgress('complete', 100, 'Proof generated successfully');
 
     return {
@@ -503,6 +514,8 @@ export async function generateDevReputationProof(
       publicInputs: proofData.publicInputs,
       nullifier: bytesToHex(nullifier),
       commitment: bytesToHex(commitment),
+      generatedAt,
+      expiresAt,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -621,7 +634,16 @@ export async function generateWhaleTradingProof(
     updateProgress('generating', 70, 'Generating ZK proof (this may take a moment)...');
     const proofData = await backend.generateProof(witness);
 
-    // Step 6: Complete
+    // Step 6: Validate proof size
+    validateProofSize(proofData.proof);
+    validatePublicInputsSize(proofData.publicInputs);
+
+    // Step 7: Calculate TTL
+    const { generatedAt, expiresAt } = calculateProofExpiration(
+      SECURITY_CONSTANTS.DEFAULT_PROOF_TTL_MS
+    );
+
+    // Step 8: Complete
     updateProgress('complete', 100, 'Proof generated successfully');
 
     return {
@@ -629,6 +651,8 @@ export async function generateWhaleTradingProof(
       publicInputs: proofData.publicInputs,
       nullifier: bytesToHex(nullifier),
       commitment: bytesToHex(commitment),
+      generatedAt,
+      expiresAt,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -716,6 +740,8 @@ export function serializeProofResult(proofResult: ProofResult): SerializedProofR
     publicInputs: proofResult.publicInputs,
     nullifier: proofResult.nullifier,
     commitment: proofResult.commitment,
+    generatedAt: proofResult.generatedAt,
+    expiresAt: proofResult.expiresAt,
   };
 }
 
@@ -743,6 +769,14 @@ export function deserializeProofResult(serialized: SerializedProofResult): Proof
     );
   }
 
+  // Validate TTL fields
+  if (typeof serialized.generatedAt !== 'number' || typeof serialized.expiresAt !== 'number') {
+    throw new VouchError(
+      'Invalid serialized proof: missing TTL fields',
+      VouchErrorCode.INVALID_PROOF_FORMAT
+    );
+  }
+
   // Convert hex string back to Uint8Array
   const hexPairs = serialized.proof.match(/.{1,2}/g);
   const proofBytes = new Uint8Array(
@@ -754,5 +788,7 @@ export function deserializeProofResult(serialized: SerializedProofResult): Proof
     publicInputs: serialized.publicInputs || [],
     nullifier: serialized.nullifier || '',
     commitment: serialized.commitment || '',
+    generatedAt: serialized.generatedAt,
+    expiresAt: serialized.expiresAt,
   };
 }

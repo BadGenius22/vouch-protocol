@@ -47,8 +47,8 @@ async function getPrivacyCashClient(): Promise<PrivacyCashClient> {
 
   try {
     // Dynamic import to avoid SSR issues
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sdk = await import('privacy-cash-sdk' as any);
+    // @ts-expect-error - SDK may not have types
+    const sdk = await import('privacy-cash-sdk');
     const PrivacyCash = sdk.PrivacyCash || sdk.default?.PrivacyCash || sdk.default;
     if (!PrivacyCash) {
       throw new Error('PrivacyCash class not found in SDK');

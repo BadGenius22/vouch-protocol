@@ -93,8 +93,8 @@ async function getShadowWireClient(): Promise<ShadowWireClientInstance> {
   if (shadowWire) return shadowWire;
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sdk = await import('@radr/shadowwire' as any);
+    // @ts-expect-error - SDK may not have types
+    const sdk = await import('@radr/shadowwire');
     const ShadowWireClient = (sdk.ShadowWireClient || sdk.default?.ShadowWireClient || sdk.default) as unknown as ShadowWireSDK;
     initWASMFn = (sdk.initWASM || sdk.default?.initWASM) as InitWASMFn;
     generateRangeProofFn = (sdk.generateRangeProof || sdk.default?.generateRangeProof) as GenerateRangeProofFn;

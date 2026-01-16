@@ -23,6 +23,21 @@ export const CIRCUIT_CONSTANTS = {
   SECRET_SIZE: 32,
 } as const;
 
+// === Security Constants ===
+
+export const SECURITY_CONSTANTS = {
+  /** Default proof TTL in milliseconds (5 minutes) */
+  DEFAULT_PROOF_TTL_MS: 5 * 60 * 1000,
+  /** Maximum proof TTL in milliseconds (30 minutes) */
+  MAX_PROOF_TTL_MS: 30 * 60 * 1000,
+  /** Minimum proof TTL in milliseconds (1 minute) */
+  MIN_PROOF_TTL_MS: 60 * 1000,
+  /** Maximum proof size in bytes */
+  MAX_PROOF_SIZE_BYTES: 4096,
+  /** Maximum public inputs size in bytes */
+  MAX_PUBLIC_INPUTS_SIZE_BYTES: 1024,
+} as const;
+
 // === Proof Types ===
 
 export type ProofType = 'developer' | 'whale';
@@ -100,6 +115,10 @@ export interface ProofResult {
   nullifier: string;
   /** Commitment hash (hex encoded) - links wallet to proof */
   commitment: string;
+  /** Timestamp when proof was generated (Unix ms) */
+  generatedAt: number;
+  /** Timestamp when proof expires (Unix ms) */
+  expiresAt: number;
 }
 
 export interface ProofGenerationProgress {
@@ -138,6 +157,10 @@ export interface SerializedProofResult {
   nullifier: string;
   /** Commitment hash (hex encoded) */
   commitment: string;
+  /** Timestamp when proof was generated (Unix ms) */
+  generatedAt: number;
+  /** Timestamp when proof expires (Unix ms) */
+  expiresAt: number;
 }
 
 // === Circuit Types (matching NoirJS InputMap format) ===
@@ -176,10 +199,17 @@ export enum VouchErrorCode {
   INSUFFICIENT_DATA = 'INSUFFICIENT_DATA',
   THRESHOLD_NOT_MET = 'THRESHOLD_NOT_MET',
 
+  // Security errors
+  PROOF_EXPIRED = 'PROOF_EXPIRED',
+  PROOF_TOO_LARGE = 'PROOF_TOO_LARGE',
+  INVALID_PROOF_FORMAT = 'INVALID_PROOF_FORMAT',
+  RATE_LIMITED = 'RATE_LIMITED',
+
   // Transaction errors
   TRANSACTION_FAILED = 'TRANSACTION_FAILED',
   NULLIFIER_ALREADY_USED = 'NULLIFIER_ALREADY_USED',
   INSUFFICIENT_FUNDS = 'INSUFFICIENT_FUNDS',
+  PROTOCOL_PAUSED = 'PROTOCOL_PAUSED',
 
   // API errors
   HELIUS_API_ERROR = 'HELIUS_API_ERROR',
