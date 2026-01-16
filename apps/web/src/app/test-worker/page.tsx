@@ -3,7 +3,8 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useProofWorker, isWorkerSupported } from '@/lib/workers';
 import { getCacheStats, clearProofCache, cleanupExpiredProofs } from '@/lib/proof-cache';
-import type { ProofGenerationProgress, DevReputationInput } from '@/lib/types';
+import { isSharedApiReady, isCircuitCached } from '@/lib/circuit';
+import type { ProofGenerationProgress, DevReputationInput, WhaleTradingInput } from '@/lib/types';
 
 // Mock data for testing
 const MOCK_DEV_INPUT: DevReputationInput = {
@@ -27,13 +28,25 @@ const MOCK_DEV_INPUT: DevReputationInput = {
   minTvl: 100000,
 };
 
+const MOCK_WHALE_INPUT: WhaleTradingInput = {
+  walletPubkey: '11111111111111111111111111111111', // System program (valid base58)
+  tradingData: {
+    totalVolume: 150000,
+    tradeCount: 5,
+    amounts: [30000, 40000, 25000, 35000, 20000],
+    period: 30, // 30 days
+    wallet: '11111111111111111111111111111111',
+  },
+  minVolume: 100000,
+};
+
 export default function TestWorkerPage() {
   const [logs, setLogs] = useState<string[]>([]);
   const [progress, setProgress] = useState<ProofGenerationProgress | null>(null);
   const [cacheStats, setCacheStats] = useState<{ count: number; oldestAt: number | null; newestAt: number | null } | null>(null);
   const [workerSupported, setWorkerSupported] = useState<boolean | null>(null);
 
-  const { generateDevProof, isGenerating, isReady } = useProofWorker();
+  const { generateDevProof, generateWhaleProof, isGenerating, isReady } = useProofWorker();
 
   // Check worker support on client only (avoids hydration mismatch)
   useEffect(() => {
@@ -246,6 +259,56 @@ export default function TestWorkerPage() {
     }
   };
 
+  // Test 7: Generate Whale Proof
+  const testGenerateWhaleProof = async () => {
+    addLog('--- Testing Whale Proof Generation ---');
+    addLog(`Shared API ready: ${isSharedApiReady() ? 'YES' : 'NO'}`);
+    addLog(`Dev circuit cached: ${isCircuitCached('dev_reputation') ? 'YES' : 'NO'}`);
+    addLog(`Whale circuit cached: ${isCircuitCached('whale_trading') ? 'YES' : 'NO'}`);
+    addLog(`Input wallet: ${MOCK_WHALE_INPUT.walletPubkey.slice(0, 8)}...`);
+    addLog(`Min Volume threshold: $${MOCK_WHALE_INPUT.minVolume.toLocaleString()}`);
+    addLog(`Trade count: ${MOCK_WHALE_INPUT.tradingData.tradeCount}`);
+    addLog(`Total volume: $${MOCK_WHALE_INPUT.tradingData.totalVolume.toLocaleString()}`);
+
+    const startTime = Date.now();
+
+    try {
+      const result = await generateWhaleProof(MOCK_WHALE_INPUT, handleProgressUpdate);
+      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+
+      addLog(`SUCCESS! Whale proof generated in ${duration}s`);
+      addLog(`Proof size: ${result.proof.length} bytes`);
+      addLog(`Public inputs: ${result.publicInputs.length}`);
+      addLog(`Nullifier: ${result.nullifier.slice(0, 16)}...`);
+      addLog(`Commitment: ${result.commitment.slice(0, 16)}...`);
+      addLog(`Expires at: ${new Date(result.expiresAt).toISOString()}`);
+
+      // Check cache after generation
+      await testCacheStats();
+    } catch (error) {
+      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+      addLog(`FAILED after ${duration}s: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  // Test 8: Cached Whale Proof (should be instant)
+  const testCachedWhaleProof = async () => {
+    addLog('--- Testing Cached Whale Proof (should be instant) ---');
+
+    const startTime = Date.now();
+
+    try {
+      const result = await generateWhaleProof(MOCK_WHALE_INPUT, handleProgressUpdate);
+      const duration = Date.now() - startTime;
+
+      addLog(`SUCCESS! Retrieved in ${duration}ms`);
+      addLog(`From cache: ${duration < 100 ? 'YES (fast)' : 'NO (slow)'}`);
+      addLog(`Nullifier: ${result.nullifier.slice(0, 16)}...`);
+    } catch (error) {
+      addLog(`FAILED: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background p-8">
       <div className="max-w-4xl mx-auto space-y-8">
@@ -374,7 +437,21 @@ export default function TestWorkerPage() {
               disabled={isGenerating}
               className="px-4 py-2 bg-accent text-accent-foreground rounded-md hover:opacity-90 transition disabled:opacity-50"
             >
-              6. Get Cached Proof
+              6. Get Cached Dev Proof
+            </button>
+            <button
+              onClick={testGenerateWhaleProof}
+              disabled={isGenerating}
+              className="px-4 py-2 bg-blue-500 text-white rounded-md hover:opacity-90 transition disabled:opacity-50"
+            >
+              7. Generate Whale Proof
+            </button>
+            <button
+              onClick={testCachedWhaleProof}
+              disabled={isGenerating}
+              className="px-4 py-2 bg-blue-500 text-white rounded-md hover:opacity-90 transition disabled:opacity-50"
+            >
+              8. Get Cached Whale Proof
             </button>
             <button
               onClick={() => setLogs([])}
@@ -408,13 +485,12 @@ export default function TestWorkerPage() {
             <li>Click "Check Worker Support" to verify Web Workers are available</li>
             <li>Click "Check Cache Stats" to see current cache state</li>
             <li>Click "Clear Cache" to start fresh</li>
-            <li>Click "Generate Proof" to test worker-based proof generation</li>
-            <li>Click "Get Cached Proof" again - it should be instant from cache</li>
+            <li>Click "Generate Proof" (5d) to test developer proof generation</li>
+            <li>Click "Get Cached Dev Proof" (6) - should be instant from cache</li>
+            <li>Click "Generate Whale Proof" (7) to test whale trading proof generation</li>
+            <li>Click "Get Cached Whale Proof" (8) - should be instant from cache</li>
             <li>Check browser DevTools console for additional debug output</li>
           </ol>
-          <p className="mt-4 text-yellow-500">
-            Note: Actual proof generation requires the circuit files in /public/circuits/
-          </p>
         </div>
       </div>
     </div>

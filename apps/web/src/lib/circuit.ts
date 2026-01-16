@@ -53,6 +53,48 @@ const circuitCache = new Map<CircuitType, CachedCircuit>();
 // Track if we're currently loading to prevent race conditions
 const loadingPromises = new Map<CircuitType, Promise<{ noir: Noir; backend: UltraHonkBackend }>>();
 
+// === Shared Barretenberg API ===
+// Single API instance shared across all circuits to avoid multiple WASM initializations
+let sharedApi: Barretenberg | null = null;
+let sharedApiPromise: Promise<Barretenberg> | null = null;
+
+/**
+ * Get or create the shared Barretenberg API instance
+ * This is the expensive WASM initialization - we only want to do it once
+ */
+async function getSharedApi(): Promise<Barretenberg> {
+  // Return existing API if available
+  if (sharedApi) {
+    return sharedApi;
+  }
+
+  // Return existing promise if initialization is in progress
+  if (sharedApiPromise) {
+    return sharedApiPromise;
+  }
+
+  // Start initialization
+  debugLog('Initializing shared Barretenberg API...');
+
+  const backendLogger = DEBUG
+    ? (msg: string) => console.log('[bb.js]', msg)
+    : undefined;
+
+  sharedApiPromise = Barretenberg.new({
+    threads: 1,
+    logger: backendLogger,
+  });
+
+  try {
+    sharedApi = await sharedApiPromise;
+    debugLog('Shared Barretenberg API initialized');
+    return sharedApi;
+  } catch (error) {
+    sharedApiPromise = null;
+    throw error;
+  }
+}
+
 // === Utilities ===
 
 /**
@@ -154,19 +196,10 @@ async function doLoadCircuit(circuitType: CircuitType): Promise<{
       );
     }
 
-    debugLog(` Initializing Barretenberg API...`);
+    debugLog(` Getting shared Barretenberg API...`);
 
-    // Initialize Barretenberg API (this loads WASM)
-    // Using single thread to avoid WASM fetch issues with SharedArrayBuffer/COEP
-    // This is slower but more compatible with browser security policies
-    const backendLogger = DEBUG
-      ? (msg: string) => console.log('[bb.js]', msg)
-      : undefined;
-
-    const api = await Barretenberg.new({
-      threads: 1,
-      logger: backendLogger,
-    });
+    // Get or create the shared Barretenberg API (WASM is only loaded once)
+    const api = await getSharedApi();
 
     debugLog(` Initializing UltraHonk backend...`);
 
@@ -176,15 +209,8 @@ async function doLoadCircuit(circuitType: CircuitType): Promise<{
     // Initialize Noir (takes full circuit for ABI parsing)
     const noir = new Noir(circuit);
 
-    // Destroy old cached API to free WASM memory
-    const oldCached = circuitCache.get(circuitType);
-    if (oldCached) {
-      try {
-        await oldCached.api.destroy();
-      } catch {
-        // Ignore destruction errors
-      }
-    }
+    // Note: We no longer destroy the API here because it's shared across circuits
+    // The shared API is preserved to avoid costly re-initialization
 
     // Cache for reuse
     circuitCache.set(circuitType, {
@@ -238,19 +264,35 @@ export async function preloadCircuits(): Promise<void> {
 /**
  * Clear the circuit cache
  * Useful for testing or when circuits are updated
+ * Note: This does not destroy the shared Barretenberg API - use destroySharedApi() for that
  */
 export async function clearCircuitCache(): Promise<void> {
-  // Properly destroy APIs to free WASM resources
-  const entries = Array.from(circuitCache.values());
-  for (const cached of entries) {
-    try {
-      await cached.api.destroy();
-    } catch {
-      // Ignore errors during cleanup
-    }
-  }
   circuitCache.clear();
   debugLog('Circuit cache cleared');
+}
+
+/**
+ * Destroy the shared Barretenberg API
+ * Only call this when completely done with proof generation (e.g., unmounting app)
+ */
+export async function destroySharedApi(): Promise<void> {
+  if (sharedApi) {
+    try {
+      await sharedApi.destroy();
+    } catch {
+      // Ignore destruction errors
+    }
+    sharedApi = null;
+    sharedApiPromise = null;
+    debugLog('Shared Barretenberg API destroyed');
+  }
+}
+
+/**
+ * Check if the shared Barretenberg API is initialized
+ */
+export function isSharedApiReady(): boolean {
+  return sharedApi !== null;
 }
 
 /**
