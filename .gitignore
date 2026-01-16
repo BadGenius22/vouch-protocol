@@ -42,6 +42,10 @@ circuits/*/proofs/
 .anchor/
 programs/*/target/
 
+# Keypairs (NEVER commit these!)
+*-keypair.json
+*.keypair.json
+
 # Testing
 coverage/
 test-results/
