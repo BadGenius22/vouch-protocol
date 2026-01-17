@@ -12,8 +12,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@aztec/bb.js": "0.82.3",
-    "@coral-xyz/anchor": "^0.29.0",
+    "@aztec/bb.js": "3.0.2",
+    "@coral-xyz/anchor": "^0.32.0",
     "@solana/web3.js": "^1.95.0",
     "bs58": "^5.0.0",
     "cors": "^2.8.5",
