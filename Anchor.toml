@@ -1,15 +1,15 @@
 [toolchain]
-anchor_version = "0.30.1"
+anchor_version = "0.32.1"
 
 [features]
 seeds = false
 skip-lint = false
 
 [programs.localnet]
-vouch_verifier = "AgG8EAwpeWqjoJQBtUY5SHX38gYpsVhcG4x7UuRHwxk7"
+vouch_verifier = "EhSkCuohWP8Sdfq6yHoKih6r2rsNoYYPZZSfpnyELuaD"
 
 [programs.devnet]
-vouch_verifier = "AgG8EAwpeWqjoJQBtUY5SHX38gYpsVhcG4x7UuRHwxk7"
+vouch_verifier = "EhSkCuohWP8Sdfq6yHoKih6r2rsNoYYPZZSfpnyELuaD"
 
 [registry]
 url = "https://api.apr.dev"

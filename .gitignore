@@ -42,9 +42,12 @@ circuits/*/proofs/
 .anchor/
 programs/*/target/
 
-# Keypairs (NEVER commit these!)
+# Keypairs (NEVER commit production keys!)
 *-keypair.json
 *.keypair.json
+
+# EXCEPTION: Devnet/test keypairs (safe to commit)
+!keys/
 
 # Testing
 coverage/

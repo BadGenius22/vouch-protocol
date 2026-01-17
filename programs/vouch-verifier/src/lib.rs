@@ -1,10 +1,10 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::ed25519_program;
 use anchor_lang::solana_program::sysvar::instructions::{
     load_current_index_checked, load_instruction_at_checked,
 };
+use solana_sdk_ids::ed25519_program;
 
-declare_id!("AgG8EAwpeWqjoJQBtUY5SHX38gYpsVhcG4x7UuRHwxk7");
+declare_id!("EhSkCuohWP8Sdfq6yHoKih6r2rsNoYYPZZSfpnyELuaD");
 
 /// Ed25519 signature verification constants
 pub const ED25519_PUBKEY_SIZE: usize = 32;

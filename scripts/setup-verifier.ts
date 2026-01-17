@@ -17,7 +17,7 @@ import {
 import * as fs from 'fs';
 import * as path from 'path';
 
-const PROGRAM_ID = new PublicKey('AgG8EAwpeWqjoJQBtUY5SHX38gYpsVhcG4x7UuRHwxk7');
+const PROGRAM_ID = new PublicKey('EhSkCuohWP8Sdfq6yHoKih6r2rsNoYYPZZSfpnyELuaD');
 
 // Anchor discriminators (first 8 bytes of SHA256("global:<method_name>"))
 const DISCRIMINATORS = {

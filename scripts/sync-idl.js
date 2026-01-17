@@ -11,7 +11,7 @@ const path = require('path');
 
 const TS_IDL_PATH = 'apps/web/src/idl/vouch_verifier.ts';
 const JSON_IDL_PATH = 'target/idl/vouch_verifier.json';
-const PROGRAM_ID = 'AgG8EAwpeWqjoJQBtUY5SHX38gYpsVhcG4x7UuRHwxk7';
+const PROGRAM_ID = 'EhSkCuohWP8Sdfq6yHoKih6r2rsNoYYPZZSfpnyELuaD';
 
 // Read TypeScript IDL
 const tsContent = fs.readFileSync(TS_IDL_PATH, 'utf8');

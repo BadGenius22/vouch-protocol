@@ -16,7 +16,7 @@ Always use these skills when working on this repository:
 
 ## Tech Stack
 
-- **Blockchain:** Solana (Anchor 0.29+)
+- **Blockchain:** Solana (Anchor 0.32.1)
 - **ZK Framework:** Noir 1.0.0-beta.18 + UltraHonk (@aztec/bb.js 3.0.2) - client-side proof generation
 - **Frontend:** Next.js 14 (App Router), Tailwind CSS, shadcn/ui
 - **Data:** Helius SDK (via Server Actions)
