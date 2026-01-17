@@ -13,7 +13,7 @@
     "start": "pnpm --filter @vouch/web start",
     "start:verifier": "pnpm --filter @vouch/verifier start",
     "lint": "pnpm --filter @vouch/web lint",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "pnpm --filter @vouch/web exec tsc --noEmit",
     "circuits:compile": "cd circuits && nargo compile --workspace",
     "circuits:test": "cd circuits && nargo test --workspace",
     "circuits:prove": "cd circuits && nargo prove --workspace",

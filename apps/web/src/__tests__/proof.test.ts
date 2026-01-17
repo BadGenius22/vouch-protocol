@@ -171,7 +171,7 @@ describe('proof utilities', () => {
         commitment: '',
         // Missing generatedAt and expiresAt
       };
-      expect(() => deserializeProofResult(invalid as SerializedProofResult)).toThrow(VouchError);
+      expect(() => deserializeProofResult(invalid as unknown as SerializedProofResult)).toThrow(VouchError);
     });
 
     it('should handle empty proof', () => {

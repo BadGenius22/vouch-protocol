@@ -482,13 +482,13 @@ export default function TestWorkerPage() {
         <div className="p-4 rounded-lg border bg-muted/50 text-sm">
           <h2 className="font-semibold mb-2">Test Instructions</h2>
           <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
-            <li>Click "Check Worker Support" to verify Web Workers are available</li>
-            <li>Click "Check Cache Stats" to see current cache state</li>
-            <li>Click "Clear Cache" to start fresh</li>
-            <li>Click "Generate Proof" (5d) to test developer proof generation</li>
-            <li>Click "Get Cached Dev Proof" (6) - should be instant from cache</li>
-            <li>Click "Generate Whale Proof" (7) to test whale trading proof generation</li>
-            <li>Click "Get Cached Whale Proof" (8) - should be instant from cache</li>
+            <li>Click &quot;Check Worker Support&quot; to verify Web Workers are available</li>
+            <li>Click &quot;Check Cache Stats&quot; to see current cache state</li>
+            <li>Click &quot;Clear Cache&quot; to start fresh</li>
+            <li>Click &quot;Generate Proof&quot; (5d) to test developer proof generation</li>
+            <li>Click &quot;Get Cached Dev Proof&quot; (6) - should be instant from cache</li>
+            <li>Click &quot;Generate Whale Proof&quot; (7) to test whale trading proof generation</li>
+            <li>Click &quot;Get Cached Whale Proof&quot; (8) - should be instant from cache</li>
             <li>Check browser DevTools console for additional debug output</li>
           </ol>
         </div>
