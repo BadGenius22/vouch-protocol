@@ -1,23 +1,49 @@
 /**
- * Privacy Cash SDK Integration
- * Enables anonymous funding for Vouch Protocol burner wallets
+ * Privacy Cash SDK Integration (Production-Hardened)
  *
- * Privacy Cash is a Tornado Cash-style mixer for Solana that breaks
- * the on-chain link between deposit and withdrawal transactions.
+ * Enables anonymous funding for Vouch Protocol burner wallets using
+ * Tornado Cash-style mixing on Solana.
  *
- * Flow:
- * 1. User deposits SOL to Privacy Cash pool
- * 2. Pool mixes funds with other users
- * 3. User withdraws to burner wallet (no on-chain link!)
+ * Security Features:
+ * - Secure memory cleanup for ephemeral keys
+ * - Retry logic with exponential backoff
+ * - Dynamic fee estimation
+ * - Abort/timeout support
+ * - Proper transaction confirmation
  *
  * @see https://github.com/Privacy-Cash/privacy-cash-sdk
  * @see https://privacycash.co
  */
 
-import { Keypair, Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import {
+  Keypair,
+  Connection,
+  PublicKey,
+  Transaction,
+  SystemProgram,
+  LAMPORTS_PER_SOL,
+} from '@solana/web3.js';
 import type { WalletContextState } from '@solana/wallet-adapter-react';
 
-// SDK types based on actual SDK type definitions
+import {
+  createLogger,
+  secureZero,
+  secureCleanupKeypair,
+  withRetry,
+  withTimeout,
+  confirmTransaction,
+  calculateFundingAmount,
+  createResettableSingleton,
+  isValidSolanaAddress,
+  isValidAmount,
+  assert,
+  type RetryOptions,
+} from './privacy-utils';
+
+// ============================================================================
+// Types
+// ============================================================================
+
 interface PrivacyCashConfig {
   RPC_url: string;
   owner: string | number[] | Uint8Array | Keypair;
@@ -58,15 +84,26 @@ interface SPLBalanceResult {
   lamports: number;
 }
 
-/**
- * Privacy Cash client interface matching the actual SDK
- */
 interface PrivacyCashClient {
   deposit(options: { lamports: number }): Promise<DepositResult>;
-  withdraw(options: { lamports: number; recipientAddress?: string; referrer?: string }): Promise<WithdrawResult>;
+  withdraw(options: {
+    lamports: number;
+    recipientAddress?: string;
+    referrer?: string;
+  }): Promise<WithdrawResult>;
   getPrivateBalance(abortSignal?: AbortSignal): Promise<BalanceResult>;
-  depositSPL(options: { base_units?: number; amount?: number; mintAddress: PublicKey | string }): Promise<SPLDepositResult>;
-  withdrawSPL(options: { base_units?: number; amount?: number; mintAddress: PublicKey | string; recipientAddress?: string; referrer?: string }): Promise<SPLWithdrawResult>;
+  depositSPL(options: {
+    base_units?: number;
+    amount?: number;
+    mintAddress: PublicKey | string;
+  }): Promise<SPLDepositResult>;
+  withdrawSPL(options: {
+    base_units?: number;
+    amount?: number;
+    mintAddress: PublicKey | string;
+    recipientAddress?: string;
+    referrer?: string;
+  }): Promise<SPLWithdrawResult>;
   getPrivateBalanceSpl(mintAddress: PublicKey | string): Promise<SPLBalanceResult>;
   clearCache(): Promise<PrivacyCashClient>;
   publicKey: PublicKey;
@@ -74,17 +111,20 @@ interface PrivacyCashClient {
 
 type PrivacyCashConstructor = new (config: PrivacyCashConfig) => PrivacyCashClient;
 
-// Cached SDK module
+// ============================================================================
+// Logger
+// ============================================================================
+
+const logger = createLogger('PrivacyCash');
+
+// ============================================================================
+// SDK Management (Resettable Singleton)
+// ============================================================================
+
 let PrivacyCashClass: PrivacyCashConstructor | null = null;
 
-/**
- * Dynamically import Privacy Cash SDK
- * Uses dynamic import to avoid SSR issues
- */
-async function getPrivacyCashClass(): Promise<PrivacyCashConstructor> {
-  if (PrivacyCashClass) return PrivacyCashClass;
-
-  try {
+const sdkLoader = createResettableSingleton(
+  async () => {
     const sdk = await import('privacycash');
     PrivacyCashClass = sdk.PrivacyCash as unknown as PrivacyCashConstructor;
 
@@ -92,19 +132,21 @@ async function getPrivacyCashClass(): Promise<PrivacyCashConstructor> {
       throw new Error('PrivacyCash class not found in SDK');
     }
 
+    logger.debug('SDK loaded successfully');
     return PrivacyCashClass;
-  } catch (error) {
-    console.error('[Privacy Cash] SDK not available:', error);
-    throw new Error('Privacy Cash SDK not installed. Run: pnpm add privacycash');
+  },
+  () => {
+    PrivacyCashClass = null;
+    logger.debug('SDK unloaded');
   }
-}
+);
 
 /**
  * Check if Privacy Cash SDK is available
  */
 export async function isPrivacyCashAvailable(): Promise<boolean> {
   try {
-    await getPrivacyCashClass();
+    await sdkLoader.get();
     return true;
   } catch {
     return false;
@@ -112,21 +154,25 @@ export async function isPrivacyCashAvailable(): Promise<boolean> {
 }
 
 /**
- * Ephemeral Keypair Manager
- *
- * Privacy Cash SDK requires a private key, but wallet adapters don't expose it.
- * Solution: Generate ephemeral keypairs in browser for Privacy Cash operations.
- *
- * Flow:
- * 1. Generate ephemeral keypair
- * 2. User sends SOL to ephemeral (visible but to random address)
- * 3. Ephemeral uses Privacy Cash to fund burner
- * 4. Burner has no direct link to real wallet
+ * Reset SDK state (for testing or cleanup)
+ */
+export async function resetPrivacyCashSDK(): Promise<void> {
+  await sdkLoader.reset();
+}
+
+// ============================================================================
+// Ephemeral Keypair Management
+// ============================================================================
+
+/**
+ * Ephemeral keypair with secure cleanup support
  */
 export interface EphemeralKeypair {
   keypair: Keypair;
   publicKey: string;
   secretKey: Uint8Array;
+  /** Mark keypair as used (triggers cleanup warning if accessed after) */
+  _used?: boolean;
 }
 
 /**
@@ -138,48 +184,104 @@ export function generateEphemeralKeypair(): EphemeralKeypair {
     keypair,
     publicKey: keypair.publicKey.toBase58(),
     secretKey: keypair.secretKey,
+    _used: false,
   };
 }
 
 /**
+ * Securely cleanup an ephemeral keypair (zeros memory)
+ * IMPORTANT: Call this after you're done with the keypair
+ */
+export function cleanupEphemeralKeypair(ephemeral: EphemeralKeypair): void {
+  if (ephemeral._used) {
+    logger.warn('Keypair already cleaned up');
+    return;
+  }
+
+  secureCleanupKeypair(ephemeral);
+  secureZero(ephemeral.keypair.secretKey);
+  ephemeral._used = true;
+
+  logger.debug('Ephemeral keypair securely cleaned up');
+}
+
+// ============================================================================
+// Core Operations
+// ============================================================================
+
+/**
+ * Options for Privacy Cash operations
+ */
+export interface PrivacyCashOperationOptions {
+  /** Abort signal for cancellation */
+  signal?: AbortSignal;
+  /** Timeout in ms (default: 120000) */
+  timeoutMs?: number;
+  /** Retry options */
+  retry?: RetryOptions;
+  /** Enable debug logging */
+  debug?: boolean;
+}
+
+const DEFAULT_TIMEOUT_MS = 120000; // 2 minutes
+const DEFAULT_RETRY_OPTIONS: RetryOptions = {
+  maxRetries: 3,
+  baseDelayMs: 2000,
+  maxDelayMs: 15000,
+};
+
+/**
  * Fund an ephemeral wallet from the user's main wallet
- * This is the one visible transaction (to a random address)
  */
 export async function fundEphemeralWallet(
   connection: Connection,
   wallet: WalletContextState,
   ephemeralPublicKey: PublicKey,
-  amountSol: number
+  amountSol: number,
+  options: PrivacyCashOperationOptions = {}
 ): Promise<string> {
-  if (!wallet.publicKey || !wallet.signTransaction) {
-    throw new Error('Wallet not connected');
-  }
+  const { signal, timeoutMs = DEFAULT_TIMEOUT_MS } = options;
 
-  const lamports = Math.floor(amountSol * LAMPORTS_PER_SOL);
+  assert(wallet.publicKey !== null, 'Wallet not connected');
+  assert(wallet.signTransaction !== undefined, 'Wallet cannot sign transactions');
+  assert(isValidAmount(amountSol), `Invalid amount: ${amountSol}`);
 
-  const transaction = new Transaction().add(
-    SystemProgram.transfer({
-      fromPubkey: wallet.publicKey,
-      toPubkey: ephemeralPublicKey,
-      lamports,
-    })
+  return withTimeout(
+    async (sig) => {
+      const lamports = Math.floor(amountSol * LAMPORTS_PER_SOL);
+
+      const transaction = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: wallet.publicKey!,
+          toPubkey: ephemeralPublicKey,
+          lamports,
+        })
+      );
+
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = wallet.publicKey!;
+
+      const signed = await wallet.signTransaction!(transaction);
+      const signature = await connection.sendRawTransaction(signed.serialize());
+
+      // Confirm with proper commitment
+      await confirmTransaction(connection, signature, {
+        commitment: 'confirmed',
+        timeoutMs: 30000,
+        signal: sig,
+      });
+
+      logger.info('Funded ephemeral wallet', {
+        amount: amountSol,
+        signature: signature.slice(0, 16) + '...',
+      });
+
+      return signature;
+    },
+    timeoutMs,
+    signal
   );
-
-  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-  transaction.recentBlockhash = blockhash;
-  transaction.feePayer = wallet.publicKey;
-
-  const signed = await wallet.signTransaction(transaction);
-  const signature = await connection.sendRawTransaction(signed.serialize());
-
-  await connection.confirmTransaction({
-    signature,
-    blockhash,
-    lastValidBlockHeight,
-  });
-
-  console.log(`[Privacy Cash] Funded ephemeral wallet: ${signature}`);
-  return signature;
 }
 
 /**
@@ -190,7 +292,7 @@ export async function createPrivacyCashClient(
   ephemeralKeypair: Keypair,
   enableDebug = false
 ): Promise<PrivacyCashClient> {
-  const PrivacyCash = await getPrivacyCashClass();
+  const PrivacyCash = await sdkLoader.get();
 
   return new PrivacyCash({
     RPC_url: rpcUrl,
@@ -200,189 +302,307 @@ export async function createPrivacyCashClient(
 }
 
 /**
- * Deposit SOL to Privacy Cash pool
+ * Deposit SOL to Privacy Cash pool with retry
  */
 export async function depositToPrivacyCash(
   client: PrivacyCashClient,
-  amountSol: number
+  amountSol: number,
+  options: PrivacyCashOperationOptions = {}
 ): Promise<string> {
+  const { signal, retry = DEFAULT_RETRY_OPTIONS } = options;
+
+  assert(isValidAmount(amountSol), `Invalid amount: ${amountSol}`);
+
   const lamports = Math.floor(amountSol * LAMPORTS_PER_SOL);
 
-  console.log(`[Privacy Cash] Depositing ${amountSol} SOL to pool...`);
-  const result = await client.deposit({ lamports });
+  logger.info('Depositing to pool', { amount: amountSol });
 
-  console.log(`[Privacy Cash] Deposit complete: ${result.tx}`);
+  const result = await withRetry(
+    () => client.deposit({ lamports }),
+    {
+      ...retry,
+      signal,
+      onRetry: (err, attempt, delay) => {
+        logger.warn(`Deposit retry ${attempt}`, { error: String(err), delayMs: delay });
+      },
+    }
+  );
+
+  logger.info('Deposit complete', { tx: result.tx.slice(0, 16) + '...' });
   return result.tx;
 }
 
 /**
- * Withdraw SOL from Privacy Cash to any address (no link!)
+ * Withdraw SOL from Privacy Cash to any address with retry
  */
 export async function withdrawFromPrivacyCash(
   client: PrivacyCashClient,
   amountSol: number,
-  recipientAddress: string
-): Promise<string> {
+  recipientAddress: string,
+  options: PrivacyCashOperationOptions = {}
+): Promise<WithdrawResult> {
+  const { signal, retry = DEFAULT_RETRY_OPTIONS } = options;
+
+  assert(isValidAmount(amountSol), `Invalid amount: ${amountSol}`);
+  assert(isValidSolanaAddress(recipientAddress), `Invalid recipient: ${recipientAddress}`);
+
   const lamports = Math.floor(amountSol * LAMPORTS_PER_SOL);
 
-  console.log(`[Privacy Cash] Withdrawing ${amountSol} SOL to ${recipientAddress.slice(0, 8)}...`);
-  const result = await client.withdraw({
-    lamports,
-    recipientAddress,
+  logger.info('Withdrawing from pool', {
+    amount: amountSol,
+    recipient: recipientAddress.slice(0, 8) + '...',
   });
 
-  console.log(`[Privacy Cash] Withdrawal complete: ${result.tx}`);
-  return result.tx;
+  const result = await withRetry(
+    () => client.withdraw({ lamports, recipientAddress }),
+    {
+      ...retry,
+      signal,
+      onRetry: (err, attempt, delay) => {
+        logger.warn(`Withdraw retry ${attempt}`, { error: String(err), delayMs: delay });
+      },
+    }
+  );
+
+  logger.info('Withdrawal complete', {
+    tx: result.tx.slice(0, 16) + '...',
+    isPartial: result.isPartial,
+    fee: result.fee_in_lamports / LAMPORTS_PER_SOL,
+  });
+
+  return result;
 }
 
 /**
  * Get private balance in Privacy Cash pool
  */
 export async function getPrivateCashBalance(
-  client: PrivacyCashClient
+  client: PrivacyCashClient,
+  signal?: AbortSignal
 ): Promise<number> {
-  const result = await client.getPrivateBalance();
+  const result = await client.getPrivateBalance(signal);
   return result.lamports / LAMPORTS_PER_SOL;
 }
 
+// ============================================================================
+// High-Level Flow APIs
+// ============================================================================
+
 /**
- * Complete flow: Fund burner wallet anonymously via Privacy Cash
- *
- * This is the main function that orchestrates the entire flow:
- * 1. Generate ephemeral keypair
- * 2. Fund ephemeral from user wallet (visible but to random address)
- * 3. Deposit from ephemeral to Privacy Cash pool
- * 4. Withdraw from pool to burner wallet (NO LINK!)
+ * Options for the complete privacy funding flow
  */
 export interface PrivacyFundingOptions {
   connection: Connection;
   wallet: WalletContextState;
   burnerPublicKey: PublicKey;
   amountSol: number;
-  rpcUrl: string;
-  onProgress?: (step: string, message: string) => void;
+  rpcUrl?: string;
+  /** Abort signal */
+  signal?: AbortSignal;
+  /** Timeout for entire flow in ms (default: 300000 = 5 min) */
+  timeoutMs?: number;
+  /** Progress callback */
+  onProgress?: (step: string, message: string, percentage: number) => void;
+  /** Whether to auto-cleanup ephemeral keypair on completion (default: true) */
+  autoCleanup?: boolean;
 }
 
 export interface PrivacyFundingResult {
   success: boolean;
-  ephemeralPublicKey: string;
+  ephemeralKeypair?: EphemeralKeypair;
   fundEphemeralTx?: string;
   depositTx?: string;
   withdrawTx?: string;
+  withdrawResult?: WithdrawResult;
+  actualAmountReceived?: number;
   error?: string;
+  /** Call this to cleanup the ephemeral keypair */
+  cleanup: () => void;
 }
 
+/**
+ * Complete flow: Fund burner wallet anonymously via Privacy Cash
+ */
 export async function fundBurnerViaPrivacyCash(
   options: PrivacyFundingOptions
 ): Promise<PrivacyFundingResult> {
-  const { connection, wallet, burnerPublicKey, amountSol, rpcUrl, onProgress } = options;
+  const {
+    connection,
+    wallet,
+    burnerPublicKey,
+    amountSol,
+    rpcUrl,
+    signal,
+    timeoutMs = 300000,
+    onProgress,
+    autoCleanup = true,
+  } = options;
 
-  const report = (step: string, message: string) => {
-    console.log(`[Privacy Cash] ${step}: ${message}`);
-    onProgress?.(step, message);
+  const effectiveRpcUrl =
+    rpcUrl || process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+
+  let ephemeral: EphemeralKeypair | undefined;
+
+  const cleanup = () => {
+    if (ephemeral && !ephemeral._used) {
+      cleanupEphemeralKeypair(ephemeral);
+    }
+  };
+
+  const report = (step: string, message: string, percentage: number) => {
+    logger.debug(`${step}: ${message}`);
+    onProgress?.(step, message, percentage);
   };
 
   try {
-    // Step 1: Generate ephemeral keypair
-    report('generating', 'Creating ephemeral wallet...');
-    const ephemeral = generateEphemeralKeypair();
+    return await withTimeout(
+      async (sig) => {
+        // Step 1: Calculate required funding with dynamic fees
+        report('calculating', 'Estimating fees...', 5);
+        const { totalRequired } = await calculateFundingAmount(connection, amountSol, {
+          includePrivacyCashFees: true,
+          priorityLevel: 'medium',
+        });
 
-    // Step 2: Fund ephemeral (add extra for fees)
-    const fundAmount = amountSol + 0.01; // Extra for Privacy Cash fees
-    report('funding', `Funding ephemeral wallet with ${fundAmount} SOL...`);
-    const fundEphemeralTx = await fundEphemeralWallet(
-      connection,
-      wallet,
-      ephemeral.keypair.publicKey,
-      fundAmount
+        // Step 2: Generate ephemeral keypair
+        report('generating', 'Creating ephemeral wallet...', 10);
+        ephemeral = generateEphemeralKeypair();
+
+        // Step 3: Fund ephemeral
+        report('funding', `Funding ephemeral with ${totalRequired.toFixed(4)} SOL...`, 20);
+        const fundEphemeralTx = await fundEphemeralWallet(
+          connection,
+          wallet,
+          ephemeral.keypair.publicKey,
+          totalRequired,
+          { signal: sig }
+        );
+
+        // Step 4: Create Privacy Cash client
+        report('connecting', 'Connecting to Privacy Cash...', 40);
+        const client = await createPrivacyCashClient(
+          effectiveRpcUrl,
+          ephemeral.keypair,
+          process.env.NODE_ENV === 'development'
+        );
+
+        // Step 5: Deposit to Privacy Cash pool
+        report('depositing', 'Depositing to privacy pool...', 50);
+        const depositTx = await depositToPrivacyCash(client, amountSol, { signal: sig });
+
+        // Step 6: Withdraw to burner
+        report('withdrawing', 'Withdrawing to burner wallet...', 75);
+        const withdrawResult = await withdrawFromPrivacyCash(
+          client,
+          amountSol * 0.995, // Leave 0.5% for fees
+          burnerPublicKey.toBase58(),
+          { signal: sig }
+        );
+
+        report('complete', 'Burner wallet funded anonymously!', 100);
+
+        // Auto cleanup if enabled
+        if (autoCleanup) {
+          cleanup();
+        }
+
+        return {
+          success: true,
+          ephemeralKeypair: autoCleanup ? undefined : ephemeral,
+          fundEphemeralTx,
+          depositTx,
+          withdrawTx: withdrawResult.tx,
+          withdrawResult,
+          actualAmountReceived: withdrawResult.amount_in_lamports / LAMPORTS_PER_SOL,
+          cleanup,
+        };
+      },
+      timeoutMs,
+      signal
     );
-
-    // Wait a bit for transaction to finalize
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // Step 3: Create Privacy Cash client
-    report('connecting', 'Connecting to Privacy Cash...');
-    const client = await createPrivacyCashClient(
-      rpcUrl,
-      ephemeral.keypair,
-      process.env.NODE_ENV === 'development'
-    );
-
-    // Step 4: Deposit to Privacy Cash pool
-    report('depositing', 'Depositing to privacy pool...');
-    const depositTx = await depositToPrivacyCash(client, amountSol);
-
-    // Step 5: Withdraw to burner (NO LINK!)
-    report('withdrawing', 'Withdrawing to burner wallet...');
-    const withdrawTx = await withdrawFromPrivacyCash(
-      client,
-      amountSol - 0.005, // Subtract small amount for fees
-      burnerPublicKey.toBase58()
-    );
-
-    report('complete', 'Burner wallet funded anonymously!');
-
-    return {
-      success: true,
-      ephemeralPublicKey: ephemeral.publicKey,
-      fundEphemeralTx,
-      depositTx,
-      withdrawTx,
-    };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    report('error', errorMessage);
+    logger.error('Privacy funding failed', error);
+
+    // Always cleanup on error
+    cleanup();
 
     return {
       success: false,
-      ephemeralPublicKey: '',
       error: errorMessage,
+      cleanup: () => {}, // No-op, already cleaned up
     };
   }
 }
 
 /**
  * Shield SOL for proof generation (simplified API for prove-flow.ts)
- * This creates an ephemeral keypair and deposits to Privacy Cash
  */
 export async function shieldForProof(
   connection: Connection,
   wallet: WalletContextState,
   amountSol: number,
-  rpcUrl?: string
-): Promise<{ ephemeralKeypair: EphemeralKeypair; depositTx: string }> {
-  if (!wallet.publicKey || !wallet.signTransaction) {
-    throw new Error('Wallet not connected');
-  }
+  options: {
+    rpcUrl?: string;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+  } = {}
+): Promise<{ ephemeralKeypair: EphemeralKeypair; depositTx: string; cleanup: () => void }> {
+  const {
+    rpcUrl,
+    signal,
+    timeoutMs = 180000,
+  } = options;
 
-  const effectiveRpcUrl = rpcUrl || process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+  assert(wallet.publicKey !== null, 'Wallet not connected');
+  assert(wallet.signTransaction !== undefined, 'Wallet cannot sign');
+  assert(isValidAmount(amountSol), `Invalid amount: ${amountSol}`);
 
-  // Generate ephemeral keypair
+  const effectiveRpcUrl =
+    rpcUrl || process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+
   const ephemeral = generateEphemeralKeypair();
 
-  // Fund ephemeral wallet
-  const fundAmount = amountSol + 0.01; // Extra for fees
-  await fundEphemeralWallet(
-    connection,
-    wallet,
-    ephemeral.keypair.publicKey,
-    fundAmount
-  );
+  const cleanup = () => {
+    if (!ephemeral._used) {
+      cleanupEphemeralKeypair(ephemeral);
+    }
+  };
 
-  // Wait for confirmation
-  await new Promise(resolve => setTimeout(resolve, 2000));
+  try {
+    return await withTimeout(
+      async (sig) => {
+        // Calculate funding with fees
+        const { totalRequired } = await calculateFundingAmount(connection, amountSol);
 
-  // Create Privacy Cash client with ephemeral
-  const client = await createPrivacyCashClient(
-    effectiveRpcUrl,
-    ephemeral.keypair,
-    process.env.NODE_ENV === 'development'
-  );
+        // Fund ephemeral wallet
+        await fundEphemeralWallet(
+          connection,
+          wallet,
+          ephemeral.keypair.publicKey,
+          totalRequired,
+          { signal: sig }
+        );
 
-  // Deposit to Privacy Cash
-  const depositTx = await depositToPrivacyCash(client, amountSol);
+        // Create Privacy Cash client with ephemeral
+        const client = await createPrivacyCashClient(
+          effectiveRpcUrl,
+          ephemeral.keypair,
+          process.env.NODE_ENV === 'development'
+        );
 
-  return { ephemeralKeypair: ephemeral, depositTx };
+        // Deposit to Privacy Cash
+        const depositTx = await depositToPrivacyCash(client, amountSol, { signal: sig });
+
+        return { ephemeralKeypair: ephemeral, depositTx, cleanup };
+      },
+      timeoutMs,
+      signal
+    );
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
 }
 
 /**
@@ -392,20 +612,56 @@ export async function withdrawPrivately(
   ephemeralKeypair: EphemeralKeypair,
   recipientAddress: string,
   amountSol: number,
-  rpcUrl?: string
-): Promise<string> {
-  const effectiveRpcUrl = rpcUrl || process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+  options: {
+    rpcUrl?: string;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+    autoCleanup?: boolean;
+  } = {}
+): Promise<{ tx: string; actualAmount: number }> {
+  const {
+    rpcUrl,
+    signal,
+    timeoutMs = 120000,
+    autoCleanup = true,
+  } = options;
 
-  // Create client with ephemeral keypair
-  const client = await createPrivacyCashClient(
-    effectiveRpcUrl,
-    ephemeralKeypair.keypair,
-    process.env.NODE_ENV === 'development'
-  );
+  assert(!ephemeralKeypair._used, 'Ephemeral keypair already used/cleaned up');
+  assert(isValidSolanaAddress(recipientAddress), `Invalid recipient: ${recipientAddress}`);
+  assert(isValidAmount(amountSol), `Invalid amount: ${amountSol}`);
 
-  // Withdraw to recipient
-  const withdrawAmount = amountSol - 0.005; // Leave room for fees
-  return withdrawFromPrivacyCash(client, withdrawAmount, recipientAddress);
+  const effectiveRpcUrl =
+    rpcUrl || process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+
+  try {
+    return await withTimeout(
+      async (sig) => {
+        // Create client with ephemeral keypair
+        const client = await createPrivacyCashClient(
+          effectiveRpcUrl,
+          ephemeralKeypair.keypair,
+          process.env.NODE_ENV === 'development'
+        );
+
+        // Withdraw to recipient (leave room for fees)
+        const withdrawAmount = amountSol * 0.995;
+        const result = await withdrawFromPrivacyCash(client, withdrawAmount, recipientAddress, {
+          signal: sig,
+        });
+
+        return {
+          tx: result.tx,
+          actualAmount: result.amount_in_lamports / LAMPORTS_PER_SOL,
+        };
+      },
+      timeoutMs,
+      signal
+    );
+  } finally {
+    if (autoCleanup) {
+      cleanupEphemeralKeypair(ephemeralKeypair);
+    }
+  }
 }
 
 /**
@@ -413,30 +669,46 @@ export async function withdrawPrivately(
  */
 export async function getPrivateBalance(
   ephemeralKeypair: EphemeralKeypair,
-  rpcUrl?: string
+  options: {
+    rpcUrl?: string;
+    signal?: AbortSignal;
+  } = {}
 ): Promise<number> {
-  const effectiveRpcUrl = rpcUrl || process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+  const { rpcUrl, signal } = options;
 
-  const client = await createPrivacyCashClient(
-    effectiveRpcUrl,
-    ephemeralKeypair.keypair,
-    false
-  );
+  assert(!ephemeralKeypair._used, 'Ephemeral keypair already used/cleaned up');
 
-  return getPrivateCashBalance(client);
+  const effectiveRpcUrl =
+    rpcUrl || process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+
+  const client = await createPrivacyCashClient(effectiveRpcUrl, ephemeralKeypair.keypair, false);
+
+  return getPrivateCashBalance(client, signal);
 }
 
-/**
- * SPL Token Operations
- */
+// ============================================================================
+// SPL Token Operations
+// ============================================================================
+
 export async function depositSPLToPrivacyCash(
   client: PrivacyCashClient,
   mintAddress: string,
-  amount: number
+  amount: number,
+  options: PrivacyCashOperationOptions = {}
 ): Promise<string> {
-  console.log(`[Privacy Cash] Depositing ${amount} SPL tokens...`);
-  const result = await client.depositSPL({ amount, mintAddress });
-  console.log(`[Privacy Cash] SPL deposit complete: ${result.tx}`);
+  const { signal, retry = DEFAULT_RETRY_OPTIONS } = options;
+
+  assert(isValidSolanaAddress(mintAddress), `Invalid mint: ${mintAddress}`);
+  assert(isValidAmount(amount), `Invalid amount: ${amount}`);
+
+  logger.info('Depositing SPL tokens', { mint: mintAddress.slice(0, 8), amount });
+
+  const result = await withRetry(() => client.depositSPL({ amount, mintAddress }), {
+    ...retry,
+    signal,
+  });
+
+  logger.info('SPL deposit complete', { tx: result.tx.slice(0, 16) + '...' });
   return result.tx;
 }
 
@@ -444,15 +716,27 @@ export async function withdrawSPLFromPrivacyCash(
   client: PrivacyCashClient,
   mintAddress: string,
   amount: number,
-  recipientAddress: string
+  recipientAddress: string,
+  options: PrivacyCashOperationOptions = {}
 ): Promise<string> {
-  console.log(`[Privacy Cash] Withdrawing ${amount} SPL tokens...`);
-  const result = await client.withdrawSPL({
+  const { signal, retry = DEFAULT_RETRY_OPTIONS } = options;
+
+  assert(isValidSolanaAddress(mintAddress), `Invalid mint: ${mintAddress}`);
+  assert(isValidSolanaAddress(recipientAddress), `Invalid recipient: ${recipientAddress}`);
+  assert(isValidAmount(amount), `Invalid amount: ${amount}`);
+
+  logger.info('Withdrawing SPL tokens', {
+    mint: mintAddress.slice(0, 8),
     amount,
-    mintAddress,
-    recipientAddress,
+    recipient: recipientAddress.slice(0, 8),
   });
-  console.log(`[Privacy Cash] SPL withdrawal complete: ${result.tx}`);
+
+  const result = await withRetry(
+    () => client.withdrawSPL({ amount, mintAddress, recipientAddress }),
+    { ...retry, signal }
+  );
+
+  logger.info('SPL withdrawal complete', { tx: result.tx.slice(0, 16) + '...' });
   return result.tx;
 }
 
@@ -460,6 +744,8 @@ export async function getSPLPrivateBalance(
   client: PrivacyCashClient,
   mintAddress: string
 ): Promise<number> {
+  assert(isValidSolanaAddress(mintAddress), `Invalid mint: ${mintAddress}`);
+
   const result = await client.getPrivateBalanceSpl(mintAddress);
   return result.amount;
 }

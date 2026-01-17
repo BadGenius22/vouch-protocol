@@ -1,8 +1,14 @@
 /**
- * Vouch Protocol - Unified Proof Flow
+ * Vouch Protocol - Unified Proof Flow (Production-Hardened)
  *
  * Privacy-first proof generation with Privacy Cash baked in as default.
  * This is the recommended entry point for generating and submitting proofs.
+ *
+ * Features:
+ * - Abort/cancellation support
+ * - Configurable timeouts
+ * - Automatic cleanup on error
+ * - Progress tracking with stages
  *
  * Flow:
  * 1. Shield SOL via Privacy Cash (hides funding source)
@@ -32,8 +38,20 @@ import {
   shieldForProof,
   withdrawPrivately,
   isPrivacyCashAvailable,
+  cleanupEphemeralKeypair,
   type EphemeralKeypair,
 } from './privacy-cash';
+import {
+  createLogger,
+  withTimeout,
+  createTimeoutSignal,
+  combineSignals,
+  estimateFees,
+} from './privacy-utils';
+
+// ============================================================================
+// Types
+// ============================================================================
 
 /**
  * Progress stages for the unified flow
@@ -74,6 +92,10 @@ export interface ProveFlowOptions {
   skipPrivacyCash?: boolean;
   /** Use verifier service for production-grade verification (recommended) */
   useVerifierService?: boolean;
+  /** Abort signal for cancellation */
+  signal?: AbortSignal;
+  /** Timeout for entire flow in ms (default: 600000 = 10 min) */
+  timeoutMs?: number;
   /** Progress callback */
   onProgress?: ProveFlowProgressCallback;
 }
@@ -95,15 +117,26 @@ export interface ProveFlowResult {
   privacyCashUsed: boolean;
   /** Whether verifier service was used */
   verifierServiceUsed: boolean;
-  /** Ephemeral keypair used for Privacy Cash (needed for withdrawal) */
-  ephemeralKeypair?: EphemeralKeypair;
   /** Error message if failed */
   error?: string;
   /** Stage where error occurred */
   errorStage?: ProveFlowStage;
+  /** Cleanup function (call to cleanup ephemeral keys) */
+  cleanup: () => void;
 }
 
+// ============================================================================
+// Constants & Logger
+// ============================================================================
+
 const DEFAULT_SHIELD_AMOUNT = 0.01; // 0.01 SOL
+const DEFAULT_TIMEOUT_MS = 600000; // 10 minutes for entire flow
+
+const logger = createLogger('ProveFlow');
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
 
 /**
  * Helper to report progress
@@ -115,7 +148,21 @@ function reportProgress(
   percentage: number
 ): void {
   callback?.({ stage, message, percentage });
+  logger.debug(`${stage}: ${message} (${percentage}%)`);
 }
+
+/**
+ * Check if operation was aborted
+ */
+function checkAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new Error('Operation cancelled');
+  }
+}
+
+// ============================================================================
+// Main Flow Functions
+// ============================================================================
 
 /**
  * Prove Developer Reputation with Privacy Cash (default flow)
@@ -164,15 +211,31 @@ async function executeProveFlow<T>(
     recipient,
     shieldAmount = DEFAULT_SHIELD_AMOUNT,
     skipPrivacyCash = false,
-    useVerifierService = true, // Default to using verifier service
+    useVerifierService = true,
+    signal,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
     onProgress,
   } = options;
+
+  // Create combined signal with timeout
+  const timeoutSignal = createTimeoutSignal(timeoutMs);
+  const combinedSignal = signal ? combineSignals(signal, timeoutSignal) : timeoutSignal;
 
   let shieldTx: string | undefined;
   let withdrawTx: string | undefined;
   let privacyCashUsed = false;
   let verifierServiceUsed = false;
   let ephemeralKeypair: EphemeralKeypair | undefined;
+  let shieldCleanup: (() => void) | undefined;
+
+  // Cleanup function to ensure ephemeral keys are zeroed
+  const cleanup = () => {
+    if (shieldCleanup) {
+      shieldCleanup();
+    } else if (ephemeralKeypair && !ephemeralKeypair._used) {
+      cleanupEphemeralKeypair(ephemeralKeypair);
+    }
+  };
 
   try {
     // Validate wallet
@@ -180,26 +243,36 @@ async function executeProveFlow<T>(
       throw new Error('Wallet not connected');
     }
 
-    const recipientPubkey = recipient
-      ? new PublicKey(recipient)
-      : wallet.publicKey;
+    checkAborted(combinedSignal);
+
+    const recipientPubkey = recipient ? new PublicKey(recipient) : wallet.publicKey;
 
     // Step 1: Shield SOL (if Privacy Cash available)
     if (!skipPrivacyCash) {
+      checkAborted(combinedSignal);
+
       const privacyCashAvailable = await isPrivacyCashAvailable();
 
       if (privacyCashAvailable) {
         reportProgress(onProgress, 'shielding', 'Shielding SOL for privacy...', 10);
 
         try {
-          const shieldResult = await shieldForProof(connection, wallet, shieldAmount);
+          const shieldResult = await shieldForProof(connection, wallet, shieldAmount, {
+            signal: combinedSignal,
+            timeoutMs: 180000, // 3 min for shield
+          });
+
           shieldTx = shieldResult.depositTx;
           ephemeralKeypair = shieldResult.ephemeralKeypair;
+          shieldCleanup = shieldResult.cleanup;
           privacyCashUsed = true;
+
           reportProgress(onProgress, 'shielding', 'SOL shielded successfully', 20);
         } catch (shieldError) {
           // Log but continue - Privacy Cash is enhancement, not requirement
-          console.warn('[ProveFlow] Privacy Cash shield failed, continuing without:', shieldError);
+          logger.warn('Privacy Cash shield failed, continuing without', {
+            error: shieldError instanceof Error ? shieldError.message : String(shieldError),
+          });
           reportProgress(onProgress, 'shielding', 'Privacy Cash unavailable, continuing...', 20);
         }
       } else {
@@ -209,6 +282,8 @@ async function executeProveFlow<T>(
       reportProgress(onProgress, 'shielding', 'Privacy Cash skipped by request', 20);
     }
 
+    checkAborted(combinedSignal);
+
     // Step 2: Generate ZK proof
     reportProgress(onProgress, 'generating-proof', 'Generating zero-knowledge proof...', 30);
 
@@ -216,16 +291,18 @@ async function executeProveFlow<T>(
 
     reportProgress(onProgress, 'generating-proof', 'Proof generated successfully', 50);
 
+    checkAborted(combinedSignal);
+
     // Step 3: Submit to chain (use verifier service if available and enabled)
     reportProgress(onProgress, 'submitting', 'Submitting proof to Solana...', 60);
 
     let verification: VerificationResult;
 
     // Check if verifier service should be used
-    const shouldUseVerifier = useVerifierService && await isVerifierAvailable();
+    const shouldUseVerifier = useVerifierService && (await isVerifierAvailable());
 
     if (shouldUseVerifier) {
-      console.log('[ProveFlow] Using verifier service for production verification');
+      logger.info('Using verifier service for production verification');
       reportProgress(onProgress, 'submitting', 'Verifying with secure verifier service...', 65);
 
       verification = await submitProofWithVerifier(
@@ -238,7 +315,7 @@ async function executeProveFlow<T>(
       );
       verifierServiceUsed = true;
     } else {
-      console.log('[ProveFlow] Using direct on-chain verification (development mode)');
+      logger.info('Using direct on-chain verification (development mode)');
       verification = await submitProofToChain(
         connection,
         proof,
@@ -257,30 +334,49 @@ async function executeProveFlow<T>(
         shieldTx,
         privacyCashUsed,
         verifierServiceUsed,
-        ephemeralKeypair,
         error: verification.error || 'Verification failed',
         errorStage: 'submitting',
+        cleanup,
       };
     }
 
     reportProgress(onProgress, 'submitting', 'Proof verified on-chain', 80);
 
+    checkAborted(combinedSignal);
+
     // Step 4: Withdraw privately (if Privacy Cash was used and we have ephemeral keypair)
-    if (privacyCashUsed && ephemeralKeypair && recipient && recipient !== wallet.publicKey.toBase58()) {
+    if (
+      privacyCashUsed &&
+      ephemeralKeypair &&
+      recipient &&
+      recipient !== wallet.publicKey.toBase58()
+    ) {
       reportProgress(onProgress, 'withdrawing', 'Withdrawing privately...', 85);
 
       try {
-        withdrawTx = await withdrawPrivately(ephemeralKeypair, recipient, shieldAmount);
+        const withdrawResult = await withdrawPrivately(ephemeralKeypair, recipient, shieldAmount, {
+          signal: combinedSignal,
+          timeoutMs: 120000, // 2 min for withdraw
+          autoCleanup: true, // Auto cleanup after withdraw
+        });
+        withdrawTx = withdrawResult.tx;
+        ephemeralKeypair = undefined; // Mark as cleaned up
+        shieldCleanup = undefined;
         reportProgress(onProgress, 'withdrawing', 'Private withdrawal complete', 95);
       } catch (withdrawError) {
         // Log but don't fail - main proof is already verified
-        console.warn('[ProveFlow] Private withdrawal failed:', withdrawError);
+        logger.warn('Private withdrawal failed', {
+          error: withdrawError instanceof Error ? withdrawError.message : String(withdrawError),
+        });
         reportProgress(onProgress, 'withdrawing', 'Withdrawal skipped (can retry later)', 95);
       }
     }
 
     // Complete
     reportProgress(onProgress, 'complete', 'Proof flow complete!', 100);
+
+    // Cleanup any remaining ephemeral keys
+    cleanup();
 
     return {
       success: true,
@@ -290,11 +386,17 @@ async function executeProveFlow<T>(
       withdrawTx,
       privacyCashUsed,
       verifierServiceUsed,
-      ephemeralKeypair,
+      cleanup: () => {}, // Already cleaned up
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const isAborted = errorMessage === 'Operation cancelled' || errorMessage.includes('timed out');
+
+    logger.error('Proof flow failed', error);
     reportProgress(onProgress, 'error', errorMessage, 0);
+
+    // Always cleanup on error
+    cleanup();
 
     return {
       success: false,
@@ -302,12 +404,16 @@ async function executeProveFlow<T>(
       withdrawTx,
       privacyCashUsed,
       verifierServiceUsed,
-      ephemeralKeypair,
-      error: errorMessage,
+      error: isAborted ? 'Operation cancelled or timed out' : errorMessage,
       errorStage: 'generating-proof',
+      cleanup: () => {}, // Already cleaned up
     };
   }
 }
+
+// ============================================================================
+// Utility Functions
+// ============================================================================
 
 /**
  * Check if enhanced privacy flow is available
@@ -333,6 +439,8 @@ export interface ProveFlowCostEstimate {
   verificationCost: number;
   /** Privacy Cash shield/withdraw cost if used (SOL) */
   privacyCashCost: number;
+  /** Network fee estimate (SOL) */
+  networkFees: number;
   /** Total estimated cost (SOL) */
   totalCost: number;
   /** Whether Privacy Cash will be used */
@@ -345,6 +453,10 @@ export async function estimateProveFlowCost(
 ): Promise<ProveFlowCostEstimate> {
   // Base verification cost (rent + tx fees)
   const verificationCost = 0.003; // ~0.003 SOL for nullifier account + fees
+
+  // Get dynamic network fees
+  const feeEstimate = await estimateFees(connection, { priorityLevel: 'medium' });
+  const networkFees = feeEstimate.totalFeeSol * 3; // Estimate for 3 transactions
 
   // Privacy Cash cost (if available)
   let privacyCashCost = 0;
@@ -360,7 +472,22 @@ export async function estimateProveFlowCost(
   return {
     verificationCost,
     privacyCashCost,
-    totalCost: verificationCost + privacyCashCost,
+    networkFees,
+    totalCost: verificationCost + privacyCashCost + networkFees,
     willUsePrivacyCash,
+  };
+}
+
+/**
+ * Create an AbortController for managing flow cancellation
+ */
+export function createFlowController(): {
+  signal: AbortSignal;
+  abort: () => void;
+} {
+  const controller = new AbortController();
+  return {
+    signal: controller.signal,
+    abort: () => controller.abort(),
   };
 }

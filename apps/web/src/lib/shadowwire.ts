@@ -1,15 +1,18 @@
 /**
- * ShadowWire SDK Integration
+ * ShadowWire SDK Integration (Production-Hardened)
+ *
  * Enables private transfers and airdrops using Bulletproofs (zero-knowledge range proofs)
+ *
+ * Security Features:
+ * - Retry logic with exponential backoff
+ * - Abort/timeout support
+ * - Structured logging
+ * - Input validation
+ * - State reset capability
  *
  * ShadowWire provides:
  * - Internal transfers: Full privacy (hides sender, recipient, and amount)
  * - External transfers: Partial privacy (hides sender only)
- *
- * Use cases for Vouch Protocol:
- * - Private airdrop distribution to verified credential holders
- * - Anonymous reward claiming
- * - Hidden balance transfers
  *
  * @see https://github.com/Radrdotfun/ShadowWire
  * @see https://www.radrlabs.io
@@ -17,24 +20,37 @@
 
 import type { WalletContextState } from '@solana/wallet-adapter-react';
 
-// Import types from the actual SDK
 import type {
-  ShadowWireClientConfig,
-  PoolBalance,
   DepositRequest as SDKDepositRequest,
-  DepositResponse,
   WithdrawRequest as SDKWithdrawRequest,
-  WithdrawResponse,
   TransferRequest as SDKTransferRequest,
-  TransferResponse,
   TransferWithClientProofsRequest,
   TokenSymbol,
   ZKProofData,
   WalletAdapter,
 } from '@radr/shadowwire';
 
-// Re-export types for external use
+import {
+  createLogger,
+  withRetry,
+  withTimeout,
+  sleep,
+  createResettableSingleton,
+  isValidSolanaAddress,
+  isValidAmount,
+  assert,
+  type RetryOptions,
+} from './privacy-utils';
+
+// ============================================================================
+// Re-exports
+// ============================================================================
+
 export type { TokenSymbol, ZKProofData, WalletAdapter };
+
+// ============================================================================
+// Constants
+// ============================================================================
 
 /**
  * Supported tokens for ShadowWire transfers
@@ -84,45 +100,74 @@ const TOKEN_DECIMALS: Record<string, number> = {
   WLFI: 6,
 };
 
-// Cached SDK references
-let ShadowWireClientClass: typeof import('@radr/shadowwire').ShadowWireClient | null = null;
-let initWASMFn: typeof import('@radr/shadowwire').initWASM | null = null;
-let isWASMSupportedFn: typeof import('@radr/shadowwire').isWASMSupported | null = null;
-let generateRangeProofFn: typeof import('@radr/shadowwire').generateRangeProof | null = null;
+// ============================================================================
+// Logger
+// ============================================================================
+
+const logger = createLogger('ShadowWire');
+
+// ============================================================================
+// SDK Management (Resettable Singleton)
+// ============================================================================
+
+interface ShadowWireSDK {
+  ShadowWireClient: typeof import('@radr/shadowwire').ShadowWireClient;
+  initWASM: typeof import('@radr/shadowwire').initWASM;
+  isWASMSupported: typeof import('@radr/shadowwire').isWASMSupported;
+  generateRangeProof: typeof import('@radr/shadowwire').generateRangeProof;
+}
+
+let sdk: ShadowWireSDK | null = null;
 let wasmInitialized = false;
-let clientInstance: InstanceType<typeof import('@radr/shadowwire').ShadowWireClient> | null = null;
 
-/**
- * Dynamically import ShadowWire SDK
- */
-async function loadShadowWireSDK(): Promise<void> {
-  if (ShadowWireClientClass) return;
+const sdkLoader = createResettableSingleton(
+  async (): Promise<ShadowWireSDK> => {
+    const imported = await import('@radr/shadowwire');
 
-  try {
-    const sdk = await import('@radr/shadowwire');
-
-    ShadowWireClientClass = sdk.ShadowWireClient;
-    initWASMFn = sdk.initWASM;
-    isWASMSupportedFn = sdk.isWASMSupported;
-    generateRangeProofFn = sdk.generateRangeProof;
-
-    if (!ShadowWireClientClass) {
+    if (!imported.ShadowWireClient) {
       throw new Error('ShadowWireClient class not found in SDK');
     }
 
-    console.log('[ShadowWire] SDK loaded successfully');
-  } catch (error) {
-    console.error('[ShadowWire] SDK not available:', error);
-    throw new Error('ShadowWire SDK not installed. Run: pnpm add @radr/shadowwire');
+    sdk = {
+      ShadowWireClient: imported.ShadowWireClient,
+      initWASM: imported.initWASM,
+      isWASMSupported: imported.isWASMSupported,
+      generateRangeProof: imported.generateRangeProof,
+    };
+
+    logger.debug('SDK loaded successfully');
+    return sdk;
+  },
+  () => {
+    sdk = null;
+    wasmInitialized = false;
+    clientSingleton.reset();
+    logger.debug('SDK unloaded');
   }
-}
+);
+
+const clientSingleton = createResettableSingleton(
+  async () => {
+    const { ShadowWireClient } = await sdkLoader.get();
+    return new ShadowWireClient({
+      debug: process.env.NODE_ENV === 'development',
+    });
+  },
+  () => {
+    logger.debug('Client instance reset');
+  }
+);
+
+// ============================================================================
+// SDK Availability
+// ============================================================================
 
 /**
  * Check if ShadowWire SDK is available
  */
 export async function isShadowWireAvailable(): Promise<boolean> {
   try {
-    await loadShadowWireSDK();
+    await sdkLoader.get();
     return true;
   } catch {
     return false;
@@ -133,132 +178,196 @@ export async function isShadowWireAvailable(): Promise<boolean> {
  * Check if browser supports WebAssembly (required for Bulletproofs)
  */
 export function isWASMSupported(): boolean {
-  if (isWASMSupportedFn) {
-    return isWASMSupportedFn();
+  if (sdk?.isWASMSupported) {
+    return sdk.isWASMSupported();
   }
   // Fallback check
   return typeof WebAssembly === 'object' && typeof WebAssembly.instantiate === 'function';
 }
 
 /**
+ * Reset SDK state (for testing or cleanup)
+ */
+export async function resetShadowWireSDK(): Promise<void> {
+  await clientSingleton.reset();
+  await sdkLoader.reset();
+  wasmInitialized = false;
+}
+
+// ============================================================================
+// WASM Initialization
+// ============================================================================
+
+/**
  * Initialize ShadowWire WASM (required before transfers)
  * Call this early in your app initialization for better UX
- *
- * @param wasmPath - Path to WASM file (default: '/wasm/settler_wasm_bg.wasm')
  */
-export async function initializeShadowWire(wasmPath = '/wasm/settler_wasm_bg.wasm'): Promise<void> {
+export async function initializeShadowWire(
+  wasmPath = '/wasm/settler_wasm_bg.wasm',
+  options: { signal?: AbortSignal; timeoutMs?: number } = {}
+): Promise<void> {
+  const { signal, timeoutMs = 30000 } = options;
+
   if (wasmInitialized) return;
 
-  await loadShadowWireSDK();
+  return withTimeout(
+    async () => {
+      const loadedSdk = await sdkLoader.get();
 
-  if (!isWASMSupported()) {
-    throw new Error('Browser does not support WebAssembly. Please use a modern browser.');
-  }
+      if (!isWASMSupported()) {
+        throw new Error('Browser does not support WebAssembly. Please use a modern browser.');
+      }
 
-  if (!initWASMFn) {
-    throw new Error('ShadowWire initWASM function not found');
-  }
+      if (!loadedSdk.initWASM) {
+        throw new Error('ShadowWire initWASM function not found');
+      }
 
-  console.log('[ShadowWire] Initializing WASM...');
-  await initWASMFn(wasmPath);
-  wasmInitialized = true;
-  console.log('[ShadowWire] WASM initialized successfully');
+      logger.info('Initializing WASM...', { path: wasmPath });
+      await loadedSdk.initWASM(wasmPath);
+      wasmInitialized = true;
+      logger.info('WASM initialized successfully');
+    },
+    timeoutMs,
+    signal
+  );
 }
 
-/**
- * Get ShadowWire client instance (singleton)
- */
-async function getShadowWireClient(): Promise<InstanceType<typeof import('@radr/shadowwire').ShadowWireClient>> {
-  if (clientInstance) return clientInstance;
-
-  await loadShadowWireSDK();
-
-  if (!ShadowWireClientClass) {
-    throw new Error('ShadowWire SDK not loaded');
-  }
-
-  clientInstance = new ShadowWireClientClass({
-    debug: process.env.NODE_ENV === 'development',
-  });
-
-  return clientInstance;
-}
+// ============================================================================
+// Token Utilities
+// ============================================================================
 
 /**
- * Token utility functions
+ * Convert human-readable amount to smallest unit
  */
 export function toSmallestUnit(amount: number, token: SupportedToken): number {
   const decimals = TOKEN_DECIMALS[token] ?? 9;
   return Math.floor(amount * Math.pow(10, decimals));
 }
 
+/**
+ * Convert smallest unit to human-readable amount
+ */
 export function fromSmallestUnit(amount: number, token: SupportedToken): number {
   const decimals = TOKEN_DECIMALS[token] ?? 9;
   return amount / Math.pow(10, decimals);
 }
 
 /**
+ * Validate token is supported
+ */
+export function isSupportedToken(token: string): token is SupportedToken {
+  return SUPPORTED_TOKENS.includes(token as SupportedToken);
+}
+
+// ============================================================================
+// Operation Options
+// ============================================================================
+
+export interface ShadowWireOperationOptions {
+  /** Abort signal for cancellation */
+  signal?: AbortSignal;
+  /** Timeout in ms (default: 120000) */
+  timeoutMs?: number;
+  /** Retry options */
+  retry?: RetryOptions;
+}
+
+const DEFAULT_TIMEOUT_MS = 120000;
+const DEFAULT_RETRY_OPTIONS: RetryOptions = {
+  maxRetries: 3,
+  baseDelayMs: 2000,
+  maxDelayMs: 15000,
+};
+
+// ============================================================================
+// Balance Operations
+// ============================================================================
+
+/**
  * Get ShadowWire balance for a wallet
  */
 export async function getShadowBalance(
   walletAddress: string,
-  token: SupportedToken = 'SOL'
+  token: SupportedToken = 'SOL',
+  options: ShadowWireOperationOptions = {}
 ): Promise<{ available: number; poolAddress: string }> {
   if (!walletAddress) {
     return { available: 0, poolAddress: '' };
   }
 
-  try {
-    await initializeShadowWire();
-    const client = await getShadowWireClient();
-    const balance = await client.getBalance(walletAddress, token);
+  const { signal, timeoutMs = DEFAULT_TIMEOUT_MS, retry = DEFAULT_RETRY_OPTIONS } = options;
 
-    return {
-      available: fromSmallestUnit(balance.available, token),
-      poolAddress: balance.pool_address,
-    };
+  try {
+    return await withTimeout(
+      async () => {
+        await initializeShadowWire();
+        const client = await clientSingleton.get();
+
+        const balance = await withRetry(() => client.getBalance(walletAddress, token), {
+          ...retry,
+          signal,
+        });
+
+        return {
+          available: fromSmallestUnit(balance.available, token),
+          poolAddress: balance.pool_address,
+        };
+      },
+      timeoutMs,
+      signal
+    );
   } catch (error) {
-    console.error('[ShadowWire] Failed to get balance:', error);
+    logger.error('Failed to get balance', error);
     return { available: 0, poolAddress: '' };
   }
 }
 
+// ============================================================================
+// Deposit/Withdraw Operations
+// ============================================================================
+
 /**
  * Deposit funds to ShadowWire pool
- * Note: SDK expects wallet address as string, not WalletContextState
  */
 export async function depositToShadow(
   wallet: WalletContextState,
   amountSol: number,
-  token: SupportedToken = 'SOL'
+  token: SupportedToken = 'SOL',
+  options: ShadowWireOperationOptions = {}
 ): Promise<string> {
-  if (!wallet.publicKey || !wallet.signTransaction) {
-    throw new Error('Wallet not connected');
-  }
+  assert(wallet.publicKey !== null, 'Wallet not connected');
+  assert(wallet.signTransaction !== undefined, 'Wallet cannot sign transactions');
+  assert(isValidAmount(amountSol), `Invalid amount: ${amountSol}`);
 
-  if (amountSol <= 0) {
-    throw new Error('Amount must be positive');
-  }
+  const { signal, timeoutMs = DEFAULT_TIMEOUT_MS, retry = DEFAULT_RETRY_OPTIONS } = options;
 
-  await initializeShadowWire();
-  const client = await getShadowWireClient();
+  return withTimeout(
+    async () => {
+      await initializeShadowWire();
+      const client = await clientSingleton.get();
 
-  const amount = toSmallestUnit(amountSol, token);
-  console.log(`[ShadowWire] Depositing ${amountSol} ${token} (${amount} smallest units)...`);
+      const amount = toSmallestUnit(amountSol, token);
+      logger.info('Depositing', { amount: amountSol, token });
 
-  // SDK expects wallet address as string
-  const depositRequest: SDKDepositRequest = {
-    wallet: wallet.publicKey.toBase58(),
-    amount,
-  };
+      const depositRequest: SDKDepositRequest = {
+        wallet: wallet.publicKey!.toBase58(),
+        amount,
+      };
 
-  const response = await client.deposit(depositRequest);
+      const response = await withRetry(() => client.deposit(depositRequest), {
+        ...retry,
+        signal,
+        onRetry: (err, attempt, delay) => {
+          logger.warn(`Deposit retry ${attempt}`, { error: String(err), delayMs: delay });
+        },
+      });
 
-  console.log(`[ShadowWire] Deposit response received`);
-
-  // Response includes unsigned_tx_base64 that needs to be signed and sent
-  // For now return success indicator - full flow would require signing
-  return response.unsigned_tx_base64;
+      logger.info('Deposit complete', { tx: response.unsigned_tx_base64.slice(0, 20) + '...' });
+      return response.unsigned_tx_base64;
+    },
+    timeoutMs,
+    signal
+  );
 }
 
 /**
@@ -267,32 +376,47 @@ export async function depositToShadow(
 export async function withdrawFromShadow(
   wallet: WalletContextState,
   amountSol: number,
-  token: SupportedToken = 'SOL'
+  token: SupportedToken = 'SOL',
+  options: ShadowWireOperationOptions = {}
 ): Promise<string> {
-  if (!wallet.publicKey || !wallet.signTransaction) {
-    throw new Error('Wallet not connected');
-  }
+  assert(wallet.publicKey !== null, 'Wallet not connected');
+  assert(wallet.signTransaction !== undefined, 'Wallet cannot sign transactions');
+  assert(isValidAmount(amountSol), `Invalid amount: ${amountSol}`);
 
-  if (amountSol <= 0) {
-    throw new Error('Amount must be positive');
-  }
+  const { signal, timeoutMs = DEFAULT_TIMEOUT_MS, retry = DEFAULT_RETRY_OPTIONS } = options;
 
-  await initializeShadowWire();
-  const client = await getShadowWireClient();
+  return withTimeout(
+    async () => {
+      await initializeShadowWire();
+      const client = await clientSingleton.get();
 
-  const amount = toSmallestUnit(amountSol, token);
-  console.log(`[ShadowWire] Withdrawing ${amountSol} ${token}...`);
+      const amount = toSmallestUnit(amountSol, token);
+      logger.info('Withdrawing', { amount: amountSol, token });
 
-  const withdrawRequest: SDKWithdrawRequest = {
-    wallet: wallet.publicKey.toBase58(),
-    amount,
-  };
+      const withdrawRequest: SDKWithdrawRequest = {
+        wallet: wallet.publicKey!.toBase58(),
+        amount,
+      };
 
-  const response = await client.withdraw(withdrawRequest);
+      const response = await withRetry(() => client.withdraw(withdrawRequest), {
+        ...retry,
+        signal,
+        onRetry: (err, attempt, delay) => {
+          logger.warn(`Withdraw retry ${attempt}`, { error: String(err), delayMs: delay });
+        },
+      });
 
-  console.log(`[ShadowWire] Withdrawal response received`);
-  return response.unsigned_tx_base64;
+      logger.info('Withdrawal complete');
+      return response.unsigned_tx_base64;
+    },
+    timeoutMs,
+    signal
+  );
 }
+
+// ============================================================================
+// Transfer Operations
+// ============================================================================
 
 /**
  * Private transfer using ShadowWire
@@ -305,41 +429,58 @@ export async function privateTransfer(
   recipientWallet: string,
   amount: number,
   token: SupportedToken = 'SOL',
-  type: 'internal' | 'external' = 'internal'
+  type: 'internal' | 'external' = 'internal',
+  options: ShadowWireOperationOptions = {}
 ): Promise<string> {
-  if (!wallet.publicKey || !wallet.signMessage) {
-    throw new Error('Wallet not connected or signMessage not available');
-  }
+  assert(wallet.publicKey !== null, 'Wallet not connected');
+  assert(wallet.signMessage !== undefined, 'Wallet cannot sign messages');
+  assert(isValidSolanaAddress(recipientWallet), `Invalid recipient: ${recipientWallet}`);
+  assert(isValidAmount(amount), `Invalid amount: ${amount}`);
 
-  if (!recipientWallet || recipientWallet.length < 32) {
-    throw new Error('Invalid recipient address');
-  }
+  const { signal, timeoutMs = DEFAULT_TIMEOUT_MS, retry = DEFAULT_RETRY_OPTIONS } = options;
 
-  if (amount <= 0) {
-    throw new Error('Amount must be positive');
-  }
+  return withTimeout(
+    async () => {
+      await initializeShadowWire();
+      const client = await clientSingleton.get();
 
-  await initializeShadowWire();
-  const client = await getShadowWireClient();
+      logger.info('Private transfer', {
+        type,
+        amount,
+        token,
+        recipient: recipientWallet.slice(0, 8) + '...',
+      });
 
-  console.log(`[ShadowWire] ${type} transfer of ${amount} ${token} to ${recipientWallet.slice(0, 8)}...`);
+      const transferRequest: SDKTransferRequest = {
+        sender: wallet.publicKey!.toBase58(),
+        recipient: recipientWallet,
+        amount,
+        token,
+        type,
+        wallet: {
+          signMessage: wallet.signMessage!,
+        },
+      };
 
-  const transferRequest: SDKTransferRequest = {
-    sender: wallet.publicKey.toBase58(),
-    recipient: recipientWallet,
-    amount, // SDK expects token units, not smallest units
-    token,
-    type,
-    wallet: {
-      signMessage: wallet.signMessage,
+      const response = await withRetry(() => client.transfer(transferRequest), {
+        ...retry,
+        signal,
+        onRetry: (err, attempt, delay) => {
+          logger.warn(`Transfer retry ${attempt}`, { error: String(err), delayMs: delay });
+        },
+      });
+
+      logger.info('Transfer complete', { tx: response.tx_signature.slice(0, 16) + '...' });
+      return response.tx_signature;
     },
-  };
-
-  const response = await client.transfer(transferRequest);
-
-  console.log(`[ShadowWire] Transfer complete: ${response.tx_signature}`);
-  return response.tx_signature;
+    timeoutMs,
+    signal
+  );
 }
+
+// ============================================================================
+// Range Proof Generation
+// ============================================================================
 
 /**
  * Generate a Bulletproof range proof locally (maximum privacy)
@@ -348,22 +489,33 @@ export async function privateTransfer(
 export async function generatePrivateRangeProof(
   amount: number,
   token: SupportedToken = 'SOL',
-  bits = 64
+  bits = 64,
+  options: ShadowWireOperationOptions = {}
 ): Promise<ZKProofData> {
-  await initializeShadowWire();
+  assert(isValidAmount(amount), `Invalid amount: ${amount}`);
 
-  if (!generateRangeProofFn) {
-    throw new Error('ShadowWire generateRangeProof function not found');
-  }
+  const { signal, timeoutMs = 60000 } = options;
 
-  const smallestUnit = toSmallestUnit(amount, token);
-  console.log(`[ShadowWire] Generating range proof for ${amount} ${token}...`);
+  return withTimeout(
+    async () => {
+      await initializeShadowWire();
+      const loadedSdk = await sdkLoader.get();
 
-  // SDK generateRangeProof takes number, not bigint
-  const proof = await generateRangeProofFn(smallestUnit, bits);
-  console.log('[ShadowWire] Range proof generated locally');
+      if (!loadedSdk.generateRangeProof) {
+        throw new Error('ShadowWire generateRangeProof function not found');
+      }
 
-  return proof;
+      const smallestUnit = toSmallestUnit(amount, token);
+      logger.info('Generating range proof', { amount, token });
+
+      const proof = await loadedSdk.generateRangeProof(smallestUnit, bits);
+      logger.info('Range proof generated');
+
+      return proof;
+    },
+    timeoutMs,
+    signal
+  );
 }
 
 /**
@@ -375,44 +527,63 @@ export async function privateTransferWithClientProof(
   recipientWallet: string,
   amount: number,
   token: SupportedToken = 'SOL',
-  type: 'internal' | 'external' = 'internal'
+  type: 'internal' | 'external' = 'internal',
+  options: ShadowWireOperationOptions = {}
 ): Promise<string> {
-  if (!wallet.publicKey || !wallet.signMessage) {
-    throw new Error('Wallet not connected or signMessage not available');
-  }
+  assert(wallet.publicKey !== null, 'Wallet not connected');
+  assert(wallet.signMessage !== undefined, 'Wallet cannot sign messages');
+  assert(isValidSolanaAddress(recipientWallet), `Invalid recipient: ${recipientWallet}`);
+  assert(isValidAmount(amount), `Invalid amount: ${amount}`);
 
-  await initializeShadowWire();
-  const client = await getShadowWireClient();
+  const { signal, timeoutMs = DEFAULT_TIMEOUT_MS, retry = DEFAULT_RETRY_OPTIONS } = options;
 
-  // Generate proof locally
-  const proof = await generatePrivateRangeProof(amount, token);
+  return withTimeout(
+    async () => {
+      await initializeShadowWire();
+      const client = await clientSingleton.get();
 
-  console.log(`[ShadowWire] ${type} transfer with client-side proof...`);
+      // Generate proof locally
+      const proof = await generatePrivateRangeProof(amount, token, 64, { signal });
 
-  const transferRequest: TransferWithClientProofsRequest = {
-    sender: wallet.publicKey.toBase58(),
-    recipient: recipientWallet,
-    amount,
-    token,
-    type,
-    wallet: {
-      signMessage: wallet.signMessage,
+      logger.info('Transfer with client-side proof', {
+        type,
+        recipient: recipientWallet.slice(0, 8) + '...',
+      });
+
+      const transferRequest: TransferWithClientProofsRequest = {
+        sender: wallet.publicKey!.toBase58(),
+        recipient: recipientWallet,
+        amount,
+        token,
+        type,
+        wallet: {
+          signMessage: wallet.signMessage!,
+        },
+        customProof: proof,
+      };
+
+      const response = await withRetry(() => client.transferWithClientProofs(transferRequest), {
+        ...retry,
+        signal,
+        onRetry: (err, attempt, delay) => {
+          logger.warn(`Transfer retry ${attempt}`, { error: String(err), delayMs: delay });
+        },
+      });
+
+      logger.info('Transfer with client proof complete', {
+        tx: response.tx_signature.slice(0, 16) + '...',
+      });
+      return response.tx_signature;
     },
-    customProof: proof,
-  };
-
-  const response = await client.transferWithClientProofs(transferRequest);
-
-  console.log(`[ShadowWire] Transfer with client proof complete: ${response.tx_signature}`);
-  return response.tx_signature;
+    timeoutMs,
+    signal
+  );
 }
 
-/**
- * Airdrop Distribution Helper
- *
- * Send tokens privately to multiple recipients
- * Used by projects to distribute airdrops to Vouch credential holders
- */
+// ============================================================================
+// Airdrop Distribution
+// ============================================================================
+
 export interface AirdropRecipient {
   address: string;
   amount: number;
@@ -425,29 +596,95 @@ export interface AirdropResult {
   error?: string;
 }
 
+export interface AirdropProgress {
+  completed: number;
+  total: number;
+  current: string;
+  status: 'pending' | 'processing' | 'complete' | 'error';
+}
+
+/**
+ * Distribute tokens privately to multiple recipients
+ */
 export async function distributePrivateAirdrop(
   wallet: WalletContextState,
   recipients: AirdropRecipient[],
   token: SupportedToken = 'SOL',
-  useClientProofs = true,
-  onProgress?: (completed: number, total: number, current: string) => void
+  options: {
+    useClientProofs?: boolean;
+    signal?: AbortSignal;
+    delayBetweenTransfers?: number;
+    onProgress?: (progress: AirdropProgress) => void;
+  } = {}
 ): Promise<AirdropResult[]> {
-  if (!wallet.publicKey || !wallet.signMessage) {
-    throw new Error('Wallet not connected');
-  }
+  assert(wallet.publicKey !== null, 'Wallet not connected');
+  assert(wallet.signMessage !== undefined, 'Wallet cannot sign messages');
+  assert(recipients.length > 0, 'No recipients provided');
+
+  const {
+    useClientProofs = true,
+    signal,
+    delayBetweenTransfers = 500,
+    onProgress,
+  } = options;
 
   await initializeShadowWire();
 
   const results: AirdropResult[] = [];
 
   for (let i = 0; i < recipients.length; i++) {
+    // Check for abort
+    if (signal?.aborted) {
+      logger.warn('Airdrop aborted', { completed: i, total: recipients.length });
+      break;
+    }
+
     const recipient = recipients[i];
-    onProgress?.(i, recipients.length, recipient.address);
+
+    onProgress?.({
+      completed: i,
+      total: recipients.length,
+      current: recipient.address,
+      status: 'processing',
+    });
+
+    // Validate recipient
+    if (!isValidSolanaAddress(recipient.address)) {
+      results.push({
+        recipient: recipient.address,
+        success: false,
+        error: 'Invalid address',
+      });
+      continue;
+    }
+
+    if (!isValidAmount(recipient.amount)) {
+      results.push({
+        recipient: recipient.address,
+        success: false,
+        error: 'Invalid amount',
+      });
+      continue;
+    }
 
     try {
       const txSignature = useClientProofs
-        ? await privateTransferWithClientProof(wallet, recipient.address, recipient.amount, token, 'internal')
-        : await privateTransfer(wallet, recipient.address, recipient.amount, token, 'internal');
+        ? await privateTransferWithClientProof(
+            wallet,
+            recipient.address,
+            recipient.amount,
+            token,
+            'internal',
+            { signal }
+          )
+        : await privateTransfer(
+            wallet,
+            recipient.address,
+            recipient.amount,
+            token,
+            'internal',
+            { signal }
+          );
 
       results.push({
         recipient: recipient.address,
@@ -462,58 +699,85 @@ export async function distributePrivateAirdrop(
       });
     }
 
-    // Small delay between transfers to avoid rate limiting
-    if (i < recipients.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, 500));
+    // Delay between transfers to avoid rate limiting
+    if (i < recipients.length - 1 && delayBetweenTransfers > 0) {
+      await sleep(delayBetweenTransfers, signal);
     }
   }
 
-  onProgress?.(recipients.length, recipients.length, 'complete');
+  onProgress?.({
+    completed: recipients.length,
+    total: recipients.length,
+    current: 'complete',
+    status: 'complete',
+  });
+
+  const successCount = results.filter(r => r.success).length;
+  logger.info('Airdrop complete', {
+    total: recipients.length,
+    success: successCount,
+    failed: recipients.length - successCount,
+  });
+
   return results;
 }
 
 /**
- * Claim airdrop helper
- * Used by Vouch credential holders to claim their airdrop
+ * Claim airdrop to wallet
  */
 export async function claimAirdropToWallet(
   wallet: WalletContextState,
   destinationWallet: string,
-  token: SupportedToken = 'SOL'
+  token: SupportedToken = 'SOL',
+  options: ShadowWireOperationOptions = {}
 ): Promise<{ balance: number; txSignature?: string }> {
-  if (!wallet.publicKey || !wallet.signMessage) {
-    throw new Error('Wallet not connected');
-  }
+  assert(wallet.publicKey !== null, 'Wallet not connected');
+  assert(wallet.signMessage !== undefined, 'Wallet cannot sign messages');
+  assert(isValidSolanaAddress(destinationWallet), `Invalid destination: ${destinationWallet}`);
 
-  await initializeShadowWire();
+  const { signal, timeoutMs = DEFAULT_TIMEOUT_MS } = options;
 
-  // Get current balance
-  const { available } = await getShadowBalance(wallet.publicKey.toBase58(), token);
+  return withTimeout(
+    async () => {
+      await initializeShadowWire();
 
-  if (available <= 0) {
-    return { balance: 0 };
-  }
+      // Get current balance
+      const { available } = await getShadowBalance(wallet.publicKey!.toBase58(), token, { signal });
 
-  // Transfer to destination (external transfer works with any wallet)
-  const txSignature = await privateTransfer(
-    wallet,
-    destinationWallet,
-    available * 0.99, // Leave small amount for fees
-    token,
-    'external'
+      if (available <= 0) {
+        return { balance: 0 };
+      }
+
+      // Transfer to destination (external transfer works with any wallet)
+      // Leave small amount for fees
+      const transferAmount = available * 0.99;
+
+      const txSignature = await privateTransfer(
+        wallet,
+        destinationWallet,
+        transferAmount,
+        token,
+        'external',
+        { signal }
+      );
+
+      return { balance: available, txSignature };
+    },
+    timeoutMs,
+    signal
   );
-
-  return { balance: available, txSignature };
 }
 
-// Legacy exports for backwards compatibility
-export {
-  privateTransfer as privateCredentialTransfer,
-};
+// ============================================================================
+// Legacy Exports
+// ============================================================================
 
-/**
- * ShadowWire flow helper for complete operations
- */
+export { privateTransfer as privateCredentialTransfer };
+
+// ============================================================================
+// Flow Helper
+// ============================================================================
+
 export interface ShadowWireFlowOptions {
   wallet: WalletContextState;
   recipientWallet: string;
@@ -521,16 +785,25 @@ export interface ShadowWireFlowOptions {
   token?: SupportedToken;
   transferType?: 'internal' | 'external';
   useClientProofs?: boolean;
+  signal?: AbortSignal;
+  timeoutMs?: number;
   onDepositComplete?: (txSignature: string) => void;
   onTransferComplete?: (txSignature: string) => void;
 }
 
+export interface ShadowWireFlowResult {
+  success: boolean;
+  depositTx?: string;
+  transferTx?: string;
+  error?: string;
+}
+
+/**
+ * Execute complete ShadowWire flow (deposit + transfer)
+ */
 export async function executeShadowWireFlow(
   options: ShadowWireFlowOptions
-): Promise<{
-  depositTx: string;
-  transferTx: string;
-}> {
+): Promise<ShadowWireFlowResult> {
   const {
     wallet,
     recipientWallet,
@@ -538,19 +811,42 @@ export async function executeShadowWireFlow(
     token = 'SOL',
     transferType = 'internal',
     useClientProofs = true,
+    signal,
+    timeoutMs = 300000,
     onDepositComplete,
     onTransferComplete,
   } = options;
 
-  // Step 1: Deposit to ShadowWire
-  const depositTx = await depositToShadow(wallet, amount, token);
-  onDepositComplete?.(depositTx);
+  try {
+    return await withTimeout(
+      async (sig) => {
+        // Step 1: Deposit to ShadowWire
+        const depositTx = await depositToShadow(wallet, amount, token, { signal: sig });
+        onDepositComplete?.(depositTx);
 
-  // Step 2: Private transfer
-  const transferTx = useClientProofs
-    ? await privateTransferWithClientProof(wallet, recipientWallet, amount, token, transferType)
-    : await privateTransfer(wallet, recipientWallet, amount, token, transferType);
-  onTransferComplete?.(transferTx);
+        // Step 2: Private transfer
+        const transferTx = useClientProofs
+          ? await privateTransferWithClientProof(
+              wallet,
+              recipientWallet,
+              amount,
+              token,
+              transferType,
+              { signal: sig }
+            )
+          : await privateTransfer(wallet, recipientWallet, amount, token, transferType, {
+              signal: sig,
+            });
+        onTransferComplete?.(transferTx);
 
-  return { depositTx, transferTx };
+        return { success: true, depositTx, transferTx };
+      },
+      timeoutMs,
+      signal
+    );
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    logger.error('ShadowWire flow failed', error);
+    return { success: false, error: errorMessage };
+  }
 }

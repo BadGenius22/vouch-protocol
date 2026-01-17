@@ -17,6 +17,7 @@ export {
   proveWhaleTrading,
   isEnhancedPrivacyAvailable,
   estimateProveFlowCost,
+  createFlowController,
   type ProveFlowOptions,
   type ProveFlowResult,
   type ProveFlowProgress,
@@ -37,3 +38,17 @@ export * from './connection';
 // === Privacy SDKs (used internally by prove-flow) ===
 export * from './privacy-cash';
 export * from './shadowwire';
+
+// === Privacy Utilities (for advanced usage) ===
+export {
+  createLogger,
+  withRetry,
+  withTimeout,
+  sleep,
+  secureZero,
+  secureCleanupKeypair,
+  isValidSolanaAddress,
+  isValidAmount,
+  type LogLevel,
+  type RetryOptions,
+} from './privacy-utils';
