@@ -102,11 +102,11 @@ describe('SECURITY_CONSTANTS', () => {
   });
 
   it('should have max proof size', () => {
-    expect(SECURITY_CONSTANTS.MAX_PROOF_SIZE_BYTES).toBe(4096);
+    expect(SECURITY_CONSTANTS.MAX_PROOF_SIZE_BYTES).toBe(32768);
   });
 
   it('should have max public inputs size', () => {
-    expect(SECURITY_CONSTANTS.MAX_PUBLIC_INPUTS_SIZE_BYTES).toBe(1024);
+    expect(SECURITY_CONSTANTS.MAX_PUBLIC_INPUTS_SIZE_BYTES).toBe(8192);
   });
 
   it('should enforce TTL ordering', () => {
