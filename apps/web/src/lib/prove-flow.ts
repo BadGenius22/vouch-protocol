@@ -32,6 +32,7 @@ import {
   shieldForProof,
   withdrawPrivately,
   isPrivacyCashAvailable,
+  type EphemeralKeypair,
 } from './privacy-cash';
 
 /**
@@ -94,6 +95,8 @@ export interface ProveFlowResult {
   privacyCashUsed: boolean;
   /** Whether verifier service was used */
   verifierServiceUsed: boolean;
+  /** Ephemeral keypair used for Privacy Cash (needed for withdrawal) */
+  ephemeralKeypair?: EphemeralKeypair;
   /** Error message if failed */
   error?: string;
   /** Stage where error occurred */
@@ -169,6 +172,7 @@ async function executeProveFlow<T>(
   let withdrawTx: string | undefined;
   let privacyCashUsed = false;
   let verifierServiceUsed = false;
+  let ephemeralKeypair: EphemeralKeypair | undefined;
 
   try {
     // Validate wallet
@@ -188,7 +192,9 @@ async function executeProveFlow<T>(
         reportProgress(onProgress, 'shielding', 'Shielding SOL for privacy...', 10);
 
         try {
-          shieldTx = await shieldForProof(wallet, shieldAmount);
+          const shieldResult = await shieldForProof(connection, wallet, shieldAmount);
+          shieldTx = shieldResult.depositTx;
+          ephemeralKeypair = shieldResult.ephemeralKeypair;
           privacyCashUsed = true;
           reportProgress(onProgress, 'shielding', 'SOL shielded successfully', 20);
         } catch (shieldError) {
@@ -251,6 +257,7 @@ async function executeProveFlow<T>(
         shieldTx,
         privacyCashUsed,
         verifierServiceUsed,
+        ephemeralKeypair,
         error: verification.error || 'Verification failed',
         errorStage: 'submitting',
       };
@@ -258,12 +265,12 @@ async function executeProveFlow<T>(
 
     reportProgress(onProgress, 'submitting', 'Proof verified on-chain', 80);
 
-    // Step 4: Withdraw privately (if Privacy Cash was used)
-    if (privacyCashUsed && recipient && recipient !== wallet.publicKey.toBase58()) {
+    // Step 4: Withdraw privately (if Privacy Cash was used and we have ephemeral keypair)
+    if (privacyCashUsed && ephemeralKeypair && recipient && recipient !== wallet.publicKey.toBase58()) {
       reportProgress(onProgress, 'withdrawing', 'Withdrawing privately...', 85);
 
       try {
-        withdrawTx = await withdrawPrivately(wallet, recipient, shieldAmount);
+        withdrawTx = await withdrawPrivately(ephemeralKeypair, recipient, shieldAmount);
         reportProgress(onProgress, 'withdrawing', 'Private withdrawal complete', 95);
       } catch (withdrawError) {
         // Log but don't fail - main proof is already verified
@@ -283,6 +290,7 @@ async function executeProveFlow<T>(
       withdrawTx,
       privacyCashUsed,
       verifierServiceUsed,
+      ephemeralKeypair,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -294,6 +302,7 @@ async function executeProveFlow<T>(
       withdrawTx,
       privacyCashUsed,
       verifierServiceUsed,
+      ephemeralKeypair,
       error: errorMessage,
       errorStage: 'generating-proof',
     };

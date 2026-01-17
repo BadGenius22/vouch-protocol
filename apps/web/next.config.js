@@ -18,7 +18,12 @@ const ContentSecurityPolicy = `
     wss://*.helius.xyz
     https://verifier.vouch.dev
     https://*.sentry.io
-    https://aztec-ignition.s3.amazonaws.com;
+    https://aztec-ignition.s3.amazonaws.com
+    https://*.privacycash.co
+    https://privacycash.co
+    https://*.radrlabs.io
+    https://api.radr.fun
+    https://*.radr.fun;
   worker-src 'self' blob:;
   frame-ancestors 'none';
   base-uri 'self';
