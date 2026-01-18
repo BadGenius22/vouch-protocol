@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useUnifiedWallet } from '@jup-ag/wallet-adapter';
 import { useSolanaConnection } from '@/components/providers';
-import { Transaction, PublicKey } from '@solana/web3.js';
+import { Transaction } from '@solana/web3.js';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -27,18 +27,20 @@ import {
 interface AirdropRegistrationProps {
   campaign: AirdropCampaign;
   nullifier?: string;
-  proofType?: 'developer' | 'whale';
+  /** Which proof type(s) the user has verified */
+  devVerified?: boolean;
+  whaleVerified?: boolean;
   onRegistered?: (shadowWireAddress: string) => void;
   className?: string;
 }
 
 type RegistrationStatus = 'idle' | 'checking' | 'loading' | 'success' | 'error' | 'already_registered';
-type RegistrationType = 'open' | 'verified';
 
 export function AirdropRegistration({
   campaign,
   nullifier,
-  proofType,
+  devVerified = false,
+  whaleVerified = false,
   onRegistered,
   className,
 }: AirdropRegistrationProps) {
@@ -48,14 +50,25 @@ export function AirdropRegistration({
   const [shadowWireAddress, setShadowWireAddress] = useState('');
   const [status, setStatus] = useState<RegistrationStatus>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [registrationType, setRegistrationType] = useState<RegistrationType>(nullifier ? 'verified' : 'open');
+  const [txSignature, setTxSignature] = useState<string | null>(null);
+
+  // Auto-select best option: whale > dev > open
+  const bestProofType: 'whale' | 'developer' | null = whaleVerified
+    ? 'whale'
+    : devVerified
+      ? 'developer'
+      : null;
+
+  const useVerified = bestProofType !== null && nullifier;
 
   // Calculate amounts for display
   const baseAmount = campaign.baseAmount / 1e9;
   const devTotal = (campaign.baseAmount + campaign.devBonus) / 1e9;
   const whaleTotal = (campaign.baseAmount + campaign.whaleBonus) / 1e9;
-  const userAmount = nullifier && proofType
-    ? calculateAirdropAmount(campaign, proofType) / 1e9
+
+  // User gets the best amount automatically
+  const userAmount = useVerified
+    ? calculateAirdropAmount(campaign, bestProofType) / 1e9
     : baseAmount;
 
   // Check if already registered (both open and verified)
@@ -66,6 +79,17 @@ export function AirdropRegistration({
       setStatus('checking');
       try {
         const campaignIdBytes = hexToBytes(campaign.campaignId);
+
+        // Check if campaign exists on-chain first (demo mode if not)
+        const { getCampaignPDA } = await import('@/lib/airdrop-registry');
+        const [campaignPDA] = getCampaignPDA(campaignIdBytes);
+        const campaignAccount = await connection.getAccountInfo(campaignPDA);
+
+        // Demo mode: campaign doesn't exist, skip registration check
+        if (!campaignAccount) {
+          setStatus('idle');
+          return;
+        }
 
         // Check open registration first
         const isOpenRegistered = await isOpenRegisteredForCampaign(
@@ -134,11 +158,19 @@ export function AirdropRegistration({
 
     try {
       const campaignIdBytes = hexToBytes(campaign.campaignId);
+      console.log('[AirdropRegistration] Campaign ID:', campaign.campaignId);
+      console.log('[AirdropRegistration] Wallet:', wallet.publicKey.toBase58());
 
+      // Get PDAs for logging
+      const { getCampaignPDA, getOpenRegistrationPDA } = await import('@/lib/airdrop-registry');
+      const [campaignPDA] = getCampaignPDA(campaignIdBytes);
+      console.log('[AirdropRegistration] Campaign PDA:', campaignPDA.toBase58());
+
+      // Build instruction based on verification status
       let instruction;
 
-      // Choose registration type based on whether user has verified credential
-      if (registrationType === 'verified' && nullifier) {
+      // Auto-select verified registration if user has a proof, otherwise open
+      if (useVerified && nullifier) {
         const nullifierBytes = hexToBytes(nullifier);
         instruction = buildRegisterForAirdropInstruction(
           wallet.publicKey,
@@ -146,8 +178,11 @@ export function AirdropRegistration({
           nullifierBytes,
           shadowWireAddress
         );
+        console.log('[AirdropRegistration] Using verified registration');
       } else {
         // Open registration - anyone can register
+        const [openRegPDA] = getOpenRegistrationPDA(campaignPDA, wallet.publicKey);
+        console.log('[AirdropRegistration] Open registration PDA:', openRegPDA.toBase58());
         instruction = buildRegisterForAirdropOpenInstruction(
           wallet.publicKey,
           campaignIdBytes,
@@ -164,11 +199,26 @@ export function AirdropRegistration({
       const signature = await connection.sendRawTransaction(signedTx.serialize());
       await connection.confirmTransaction(signature, 'confirmed');
 
+      setTxSignature(signature);
       setStatus('success');
+
+      // Store registration type in localStorage for claim page
+      if (typeof window !== 'undefined') {
+        const regType = bestProofType || 'open';
+        localStorage.setItem('vouch_registration_type', regType);
+        console.log('[AirdropRegistration] Stored registration type:', regType);
+      }
+
       onRegistered?.(shadowWireAddress);
     } catch (err) {
       setStatus('error');
-      setErrorMessage(err instanceof Error ? err.message : 'Registration failed');
+      const errorMsg = err instanceof Error ? err.message : 'Registration failed';
+      // Provide more helpful error messages
+      if (errorMsg.includes('already in use') || errorMsg.includes('already been processed')) {
+        setErrorMessage('You have already registered for this campaign');
+      } else {
+        setErrorMessage(errorMsg);
+      }
     }
   };
 
@@ -223,16 +273,48 @@ export function AirdropRegistration({
           </div>
         </div>
 
-        {/* Your Amount */}
-        <div className="rounded-md bg-green-500/10 border border-green-500/30 p-3">
+        {/* Your Amount - Auto-selected best option */}
+        <div className={`rounded-md p-3 border ${
+          bestProofType === 'whale'
+            ? 'bg-purple-500/10 border-purple-500/30'
+            : bestProofType === 'developer'
+              ? 'bg-cyan-500/10 border-cyan-500/30'
+              : 'bg-green-500/10 border-green-500/30'
+        }`}>
           <div className="flex justify-between items-center">
-            <span className="text-sm text-green-400">Your Reward:</span>
-            <span className="text-xl font-bold text-green-300">{userAmount.toFixed(2)} tokens</span>
+            <span className={`text-sm ${
+              bestProofType === 'whale'
+                ? 'text-purple-400'
+                : bestProofType === 'developer'
+                  ? 'text-cyan-400'
+                  : 'text-green-400'
+            }`}>
+              {bestProofType === 'whale'
+                ? '🐋 Whale Verified'
+                : bestProofType === 'developer'
+                  ? '👨‍💻 Developer Verified'
+                  : 'Your Reward'}
+            </span>
+            <span className={`text-xl font-bold ${
+              bestProofType === 'whale'
+                ? 'text-purple-300'
+                : bestProofType === 'developer'
+                  ? 'text-cyan-300'
+                  : 'text-green-300'
+            }`}>{userAmount.toFixed(2)} tokens</span>
           </div>
-          <p className="text-xs text-green-500 mt-1">
-            {nullifier && proofType
-              ? `Base + ${proofType === 'developer' ? 'Dev' : 'Whale'} bonus`
-              : 'Base amount (verify to get bonus!)'}
+          <p className={`text-xs mt-1 ${
+            bestProofType === 'whale'
+              ? 'text-purple-500'
+              : bestProofType === 'developer'
+                ? 'text-cyan-500'
+                : 'text-green-500'
+          }`}>
+            {bestProofType === 'whale'
+              ? `Base + Whale bonus (best rate!)`
+              : bestProofType === 'developer'
+                ? `Base + Developer bonus`
+                : 'Base amount (verify to get bonus!)'}
           </p>
         </div>
 
@@ -245,39 +327,17 @@ export function AirdropRegistration({
           </div>
         )}
 
-        {/* Registration Type Toggle */}
-        {nullifier && status !== 'already_registered' && (
-          <div className="rounded-md bg-slate-800/50 p-3">
-            <p className="text-sm font-medium text-white mb-2">Registration Type</p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setRegistrationType('verified')}
-                className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
-                  registrationType === 'verified'
-                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50'
-                    : 'bg-slate-700/50 text-slate-400 hover:bg-slate-700'
-                }`}
-              >
-                Verified ({proofType || 'dev'})
-                <span className="block text-xs opacity-70">Get full bonus</span>
-              </button>
-              <button
-                onClick={() => setRegistrationType('open')}
-                className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
-                  registrationType === 'open'
-                    ? 'bg-slate-600/50 text-white border border-slate-500/50'
-                    : 'bg-slate-700/50 text-slate-400 hover:bg-slate-700'
-                }`}
-              >
-                Open
-                <span className="block text-xs opacity-70">Base only</span>
-              </button>
-            </div>
+        {/* Show both verifications badge */}
+        {devVerified && whaleVerified && (
+          <div className="rounded-md bg-gradient-to-r from-cyan-500/10 to-purple-500/10 p-3 border border-purple-500/20">
+            <p className="text-sm font-medium text-white">
+              🎉 You have both verifications! Auto-selected whale bonus (highest rate).
+            </p>
           </div>
         )}
 
-        {/* Credential Status */}
-        {!nullifier && (
+        {/* Credential Status - Prompt to verify if not verified */}
+        {!devVerified && !whaleVerified && (
           <div className="rounded-md bg-slate-800/50 p-3">
             <p className="text-sm font-medium text-white">Want more tokens?</p>
             <p className="text-sm text-slate-400 mt-1">
@@ -332,8 +392,20 @@ export function AirdropRegistration({
 
         {/* Success Message */}
         {status === 'success' && (
-          <div className="rounded-md bg-green-500/20 p-3 text-sm text-green-300">
-            Successfully registered for the airdrop! You will receive {userAmount.toFixed(2)} tokens at your ShadowWire address.
+          <div className="space-y-2">
+            <div className="rounded-md bg-green-500/20 p-3 text-sm text-green-300">
+              <p>Successfully registered for the airdrop! You will receive {userAmount.toFixed(2)} tokens at your ShadowWire address.</p>
+              {txSignature && (
+                <a
+                  href={`https://explorer.solana.com/tx/${txSignature}?cluster=devnet`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-2 inline-block text-xs text-green-400 hover:text-green-300 underline"
+                >
+                  View transaction on Solana Explorer →
+                </a>
+              )}
+            </div>
           </div>
         )}
 

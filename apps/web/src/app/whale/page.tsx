@@ -66,19 +66,22 @@ function WhalePageContent() {
       try {
         const { computeNullifierForWallet } = await import('@/lib/proof');
         const { isNullifierUsed, isProgramDeployed } = await import('@/lib/verify');
+        const { preloadCircuits } = await import('@/lib/circuit');
 
-        // Check if program is deployed
-        const deployed = await isProgramDeployed(connection);
+        // Compute nullifier (synchronous)
+        const nullifier = computeNullifierForWallet(wallet.publicKey.toBase58(), 'whale');
+
+        // Run all checks in parallel: program deployed, nullifier used, and preload circuits
+        const [deployed, used] = await Promise.all([
+          isProgramDeployed(connection),
+          isNullifierUsed(connection, nullifier),
+          preloadCircuits(), // Warm up circuit cache in background
+        ]);
+
         if (!deployed) {
           setStep('connect');
           return;
         }
-
-        // Compute nullifier for this wallet + whale proof type
-        const nullifier = await computeNullifierForWallet(wallet.publicKey.toBase58(), 'whale');
-
-        // Check if nullifier has been used
-        const used = await isNullifierUsed(connection, nullifier);
 
         if (used) {
           setExistingNullifier(nullifier);
@@ -97,8 +100,15 @@ function WhalePageContent() {
 
   const getCompletedSteps = (): string[] => {
     const stepOrder = ['connect', 'fetch', 'generate', 'verify', 'complete'];
+    // Handle special steps that aren't in the display order
+    if (step === 'checking') {
+      return []; // Still checking, nothing completed yet
+    }
+    if (step === 'already-verified') {
+      return stepOrder; // All steps completed (already verified)
+    }
     const currentIndex = stepOrder.indexOf(step);
-    return stepOrder.slice(0, currentIndex);
+    return currentIndex >= 0 ? stepOrder.slice(0, currentIndex) : [];
   };
 
   const handleFetchData = useCallback(async () => {
@@ -128,8 +138,10 @@ function WhalePageContent() {
     setError(null);
     setProofProgress(0);
 
+    let progressInterval: NodeJS.Timeout | null = null;
+
     try {
-      const progressInterval = setInterval(() => {
+      progressInterval = setInterval(() => {
         setProofProgress((prev) => Math.min(prev + Math.random() * 15, 90));
       }, 500);
 
@@ -149,6 +161,7 @@ function WhalePageContent() {
         setLoading(false);
       }, 500);
     } catch (err) {
+      if (progressInterval) clearInterval(progressInterval);
       setProofProgress(0);
       setError(err instanceof Error ? err.message : 'Failed to generate proof');
       setLoading(false);
@@ -195,6 +208,11 @@ function WhalePageContent() {
       setVerificationResult(result);
       if (result.success) {
         setStep('complete');
+        // Store nullifier in localStorage for airdrop registration
+        if (proofResult.nullifier && typeof window !== 'undefined') {
+          localStorage.setItem('vouch_nullifier', proofResult.nullifier);
+          localStorage.setItem('vouch_proof_type', 'whale');
+        }
       } else {
         setError(result.error || 'Verification failed');
       }

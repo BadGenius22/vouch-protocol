@@ -1,57 +1,37 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useUnifiedWallet } from '@jup-ag/wallet-adapter';
 import { useWalletReady, useSolanaConnection } from '@/components/providers';
 import { GlowCard } from '@/components/ui/glow-card';
 import { GlowButton } from '@/components/ui/glow-button';
 import { StepIndicator } from '@/components/ui/step-indicator';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { WalletButton } from '@/components/wallet/wallet-button';
 import { AirdropRegistration } from '@/components/airdrop/AirdropRegistration';
 import { AirdropClaim } from '@/components/airdrop/AirdropClaim';
-import {
-  type AirdropCampaign,
-  validateShadowWireAddress,
-} from '@/lib/airdrop-registry';
+import { type AirdropCampaign } from '@/lib/airdrop-registry';
 import { Loader2, BadgeCheck, Code2, TrendingUp } from 'lucide-react';
 
 type PageState = 'browse' | 'register' | 'claim';
 
-// Mock campaigns for demo - in production, these would be fetched from the chain
-const MOCK_CAMPAIGNS: AirdropCampaign[] = [
+// Real campaign on devnet - VOUCH token airdrop
+// Campaign created via: scripts/create-devnet-campaign.ts
+const DEVNET_CAMPAIGNS: AirdropCampaign[] = [
   {
-    campaignId: 'a1b2c3d4e5f6789012345678901234567890123456789012345678901234',
-    creator: 'Creator1111111111111111111111111111111111111',
-    name: 'Vouch Early Adopters',
-    tokenMint: 'So11111111111111111111111111111111111111112',
-    baseAmount: 500_000_000, // 0.5 SOL base for everyone
-    devBonus: 500_000_000, // +0.5 SOL for devs (total 1 SOL)
-    whaleBonus: 4_500_000_000, // +4.5 SOL for whales (total 5 SOL)
-    registrationDeadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
+    campaignId: 'db4811899b3214b0e3191ca1500c2e8be0c487cfa477eab1b5020c655cebeb6b',
+    creator: '3LQdxe988qYTwSS3dUo4uigYdoZEGNMNPGhLEizKXGrK',
+    name: 'Vouch Devnet Airdrop',
+    tokenMint: 'GRL7X2VtBZnKUmrag6zXjFUno8q8HCMssTA3W8oiP8mx', // VOUCH token
+    baseAmount: 100_000_000_000, // 100 VOUCH base for everyone
+    devBonus: 50_000_000_000, // +50 VOUCH for devs (total 150 VOUCH)
+    whaleBonus: 150_000_000_000, // +150 VOUCH for whales (total 250 VOUCH)
+    registrationDeadline: new Date('2026-02-17T14:31:57.000Z'),
     status: 'open',
-    totalRegistrations: 42,
+    totalRegistrations: 0,
     openRegistrations: 0,
-    devRegistrations: 30,
-    whaleRegistrations: 12,
+    devRegistrations: 0,
+    whaleRegistrations: 0,
     createdAt: new Date(),
-  },
-  {
-    campaignId: 'b2c3d4e5f67890123456789012345678901234567890123456789012345a',
-    creator: 'Creator2222222222222222222222222222222222222',
-    name: 'DeFi Builders Reward',
-    tokenMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
-    baseAmount: 50_000_000, // 50 USDC base
-    devBonus: 50_000_000, // +50 USDC for devs (total 100 USDC)
-    whaleBonus: 450_000_000, // +450 USDC for whales (total 500 USDC)
-    registrationDeadline: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 14 days
-    status: 'open',
-    totalRegistrations: 18,
-    openRegistrations: 0,
-    devRegistrations: 15,
-    whaleRegistrations: 3,
-    createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), // 3 days ago
   },
 ];
 
@@ -88,7 +68,7 @@ function AirdropPageContent() {
 
   const [pageState, setPageState] = useState<PageState>('browse');
   const [selectedCampaign, setSelectedCampaign] = useState<AirdropCampaign | null>(null);
-  const [campaigns] = useState<AirdropCampaign[]>(MOCK_CAMPAIGNS);
+  const [campaigns] = useState<AirdropCampaign[]>(DEVNET_CAMPAIGNS);
   const [currentStep, setCurrentStep] = useState('connect');
   const [completedSteps, setCompletedSteps] = useState<string[]>([]);
   const [nullifier, setNullifier] = useState<string | null>(null);
@@ -141,7 +121,7 @@ function AirdropPageContent() {
         return;
       }
 
-      setVerificationStatus(prev => ({ ...prev, checking: true }));
+      setVerificationStatus((prev) => ({ ...prev, checking: true }));
 
       try {
         const { computeNullifierForWallet } = await import('@/lib/proof');
@@ -154,13 +134,15 @@ function AirdropPageContent() {
           return;
         }
 
-        // Check dev verification
+        // Compute nullifiers (synchronous)
         const devNullifier = computeNullifierForWallet(wallet.publicKey.toBase58(), 'developer');
-        const devUsed = await isNullifierUsed(connection, devNullifier);
-
-        // Check whale verification
         const whaleNullifier = computeNullifierForWallet(wallet.publicKey.toBase58(), 'whale');
-        const whaleUsed = await isNullifierUsed(connection, whaleNullifier);
+
+        // Check both verifications in parallel
+        const [devUsed, whaleUsed] = await Promise.all([
+          isNullifierUsed(connection, devNullifier),
+          isNullifierUsed(connection, whaleNullifier),
+        ]);
 
         setVerificationStatus({
           checking: false,
@@ -261,9 +243,7 @@ function AirdropPageContent() {
         {!wallet.publicKey && (
           <GlowCard className="max-w-md mx-auto mb-8">
             <div className="p-6 text-center">
-              <h2 className="text-xl font-semibold text-white mb-4">
-                Connect Your Wallet
-              </h2>
+              <h2 className="text-xl font-semibold text-white mb-4">Connect Your Wallet</h2>
               <p className="text-slate-400 mb-6">
                 Connect your Solana wallet to browse campaigns and register for airdrops.
               </p>
@@ -283,7 +263,7 @@ function AirdropPageContent() {
                   <Loader2 className="w-6 h-6 text-cyan-400 animate-spin mx-auto mb-2" />
                   <p className="text-slate-400 text-sm">Checking verification status...</p>
                 </div>
-              ) : (verificationStatus.devVerified || verificationStatus.whaleVerified) ? (
+              ) : verificationStatus.devVerified || verificationStatus.whaleVerified ? (
                 <>
                   <h3 className="text-lg font-semibold text-green-400 mb-3 flex items-center gap-2">
                     <BadgeCheck className="w-5 h-5" />
@@ -313,19 +293,21 @@ function AirdropPageContent() {
                     🎁 Want Bonus Tokens?
                   </h3>
                   <p className="text-slate-400 mb-4">
-                    Anyone can register for airdrops! Complete a proof to unlock <span className="text-cyan-400 font-medium">dev bonus</span> or <span className="text-purple-400 font-medium">whale bonus</span> rewards.
+                    Anyone can register for airdrops! Complete a proof to unlock{' '}
+                    <span className="text-cyan-400 font-medium">dev bonus</span> or{' '}
+                    <span className="text-purple-400 font-medium">whale bonus</span> rewards.
                   </p>
                   <div className="flex gap-4 justify-center">
                     <GlowButton
                       variant="outline"
-                      onClick={() => window.location.href = '/developer'}
+                      onClick={() => (window.location.href = '/developer')}
                       className="border-cyan-500/50 hover:border-cyan-400"
                     >
                       Dev Proof (+bonus)
                     </GlowButton>
                     <GlowButton
                       variant="outline"
-                      onClick={() => window.location.href = '/whale'}
+                      onClick={() => (window.location.href = '/whale')}
                       className="border-purple-500/50 hover:border-purple-400"
                     >
                       Whale Proof (+bonus)
@@ -340,9 +322,18 @@ function AirdropPageContent() {
         {/* Main Content */}
         {pageState === 'browse' && (
           <div className="space-y-6">
-            <h2 className="text-2xl font-semibold text-white mb-4">
-              Active Campaigns
-            </h2>
+            {/* Devnet Notice */}
+            <div className="rounded-lg bg-cyan-500/10 border border-cyan-500/30 p-3 flex items-center gap-3">
+              <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-xs font-bold rounded">
+                DEVNET
+              </span>
+              <p className="text-sm text-cyan-300">
+                Live on Solana Devnet! Register to receive real VOUCH tokens. Transactions are
+                recorded on-chain.
+              </p>
+            </div>
+
+            <h2 className="text-2xl font-semibold text-white mb-4">Active Campaigns</h2>
 
             {campaigns.length === 0 ? (
               <GlowCard className="p-6 text-center">
@@ -351,19 +342,18 @@ function AirdropPageContent() {
             ) : (
               <div className="grid gap-6 md:grid-cols-2">
                 {campaigns.map((campaign) => (
-                  <GlowCard key={campaign.campaignId} className="p-6">
+                  <GlowCard key={campaign.campaignId} className="p-6 relative">
+                    {/* Devnet Badge */}
+                    <span className="absolute top-3 right-3 px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-xs font-bold rounded">
+                      DEVNET
+                    </span>
                     <div className="flex justify-between items-start mb-4">
                       <div>
-                        <h3 className="text-xl font-semibold text-white">
-                          {campaign.name}
-                        </h3>
+                        <h3 className="text-xl font-semibold text-white">{campaign.name}</h3>
                         <p className={`text-sm ${getStatusColor(campaign.status)}`}>
                           {getStatusLabel(campaign.status)}
                         </p>
                       </div>
-                      <span className="text-xs text-slate-500 font-mono">
-                        {campaign.campaignId.slice(0, 8)}...
-                      </span>
                     </div>
 
                     <div className="space-y-3 mb-4">
@@ -371,15 +361,21 @@ function AirdropPageContent() {
                       <div className="grid grid-cols-3 gap-2 text-center py-2">
                         <div className="bg-slate-800/50 rounded-lg p-2">
                           <p className="text-xs text-slate-400">Base</p>
-                          <p className="text-sm font-bold text-white">{(campaign.baseAmount / 1e9).toFixed(2)}</p>
+                          <p className="text-sm font-bold text-white">
+                            {(campaign.baseAmount / 1e9).toFixed(2)}
+                          </p>
                         </div>
                         <div className="bg-cyan-900/20 rounded-lg p-2 border border-cyan-500/20">
                           <p className="text-xs text-cyan-400">Dev</p>
-                          <p className="text-sm font-bold text-cyan-300">{((campaign.baseAmount + campaign.devBonus) / 1e9).toFixed(2)}</p>
+                          <p className="text-sm font-bold text-cyan-300">
+                            {((campaign.baseAmount + campaign.devBonus) / 1e9).toFixed(2)}
+                          </p>
                         </div>
                         <div className="bg-purple-900/20 rounded-lg p-2 border border-purple-500/20">
                           <p className="text-xs text-purple-400">Whale</p>
-                          <p className="text-sm font-bold text-purple-300">{((campaign.baseAmount + campaign.whaleBonus) / 1e9).toFixed(2)}</p>
+                          <p className="text-sm font-bold text-purple-300">
+                            {((campaign.baseAmount + campaign.whaleBonus) / 1e9).toFixed(2)}
+                          </p>
                         </div>
                       </div>
                       <div className="flex justify-between text-sm">
@@ -391,7 +387,8 @@ function AirdropPageContent() {
                       <div className="flex justify-between text-sm">
                         <span className="text-slate-400">Registrations:</span>
                         <span className="text-white text-xs">
-                          {campaign.totalRegistrations} total ({campaign.openRegistrations} open, {campaign.devRegistrations} dev, {campaign.whaleRegistrations} whale)
+                          {campaign.totalRegistrations} total ({campaign.openRegistrations} open,{' '}
+                          {campaign.devRegistrations} dev, {campaign.whaleRegistrations} whale)
                         </span>
                       </div>
                     </div>
@@ -405,8 +402,8 @@ function AirdropPageContent() {
                         {!wallet.publicKey
                           ? 'Connect Wallet'
                           : campaign.status !== 'open'
-                          ? 'Registration Closed'
-                          : 'Register Now'}
+                            ? 'Registration Closed'
+                            : 'Register Now'}
                       </GlowButton>
                     </div>
                   </GlowCard>
@@ -416,9 +413,7 @@ function AirdropPageContent() {
 
             {/* Privacy Explainer */}
             <GlowCard className="p-6 mt-8">
-              <h3 className="text-lg font-semibold text-white mb-4">
-                How Private Airdrops Work
-              </h3>
+              <h3 className="text-lg font-semibold text-white mb-4">How Private Airdrops Work</h3>
               <div className="grid md:grid-cols-4 gap-4">
                 <div className="text-center p-4 bg-slate-800/50 rounded-lg">
                   <div className="text-3xl mb-2">1</div>
@@ -461,12 +456,7 @@ function AirdropPageContent() {
               }}
               className="text-slate-400 hover:text-white mb-4 flex items-center gap-2"
             >
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -480,6 +470,8 @@ function AirdropPageContent() {
             <AirdropRegistration
               campaign={selectedCampaign}
               nullifier={nullifier || undefined}
+              devVerified={verificationStatus.devVerified}
+              whaleVerified={verificationStatus.whaleVerified}
               onRegistered={handleRegistrationComplete}
               className="bg-slate-900/50 border-slate-700"
             />
@@ -488,16 +480,11 @@ function AirdropPageContent() {
 
         {pageState === 'claim' && (
           <div className="max-w-xl mx-auto">
-            <AirdropClaim
-              token="SOL"
-              className="bg-slate-900/50 border-slate-700"
-            />
+            <AirdropClaim className="bg-slate-900/50 border-slate-700" />
 
             {/* Additional Info */}
             <GlowCard className="mt-6 p-6">
-              <h3 className="text-lg font-semibold text-white mb-3">
-                About Private Claims
-              </h3>
+              <h3 className="text-lg font-semibold text-white mb-3">About Private Claims</h3>
               <ul className="space-y-2 text-sm text-slate-400">
                 <li className="flex items-start gap-2">
                   <span className="text-green-400 mt-0.5">&#10003;</span>
