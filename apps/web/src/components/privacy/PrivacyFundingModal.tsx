@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { useWallet, useConnection } from '@solana/wallet-adapter-react';
+import { useUnifiedWallet } from '@jup-ag/wallet-adapter';
+import { useSolanaConnection } from '@/components/providers';
 import { PublicKey, Keypair } from '@solana/web3.js';
 import {
   fundBurnerViaPrivacyCash,
@@ -46,8 +47,8 @@ export function PrivacyFundingModal({
   triggerButton,
   defaultAmount = 0.05,
 }: PrivacyFundingModalProps) {
-  const wallet = useWallet();
-  const { connection } = useConnection();
+  const wallet = useUnifiedWallet();
+  const connection = useSolanaConnection();
 
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState(defaultAmount.toString());

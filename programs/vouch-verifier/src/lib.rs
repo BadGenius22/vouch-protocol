@@ -337,6 +337,255 @@ pub mod vouch_verifier {
     // 5. On-chain program verifies Ed25519 signature and records result
     //
     // See: https://github.com/solana-foundation/noir-examples for Groth16 alternative
+
+    // === Private Airdrop Registry ===
+    // Enables privacy-preserving airdrops where:
+    // - Recipients prove eligibility via Vouch credentials
+    // - Distribution amounts are hidden via ShadowWire
+    // - No one can link real wallets to airdrop amounts
+
+    /// Create a new airdrop campaign
+    /// Only the campaign creator can distribute to registered addresses
+    /// Create a tiered airdrop campaign
+    /// - base_amount: Everyone gets this (open registration)
+    /// - dev_bonus: Additional amount for verified developers
+    /// - whale_bonus: Additional amount for verified whales
+    pub fn create_airdrop_campaign(
+        ctx: Context<CreateAirdropCampaign>,
+        campaign_id: [u8; 32],
+        name: String,
+        token_mint: Pubkey,
+        base_amount: u64,
+        dev_bonus: u64,
+        whale_bonus: u64,
+        registration_deadline: i64,
+    ) -> Result<()> {
+        require!(name.len() <= 64, VouchError::NameTooLong);
+        require!(registration_deadline > Clock::get()?.unix_timestamp, VouchError::InvalidDeadline);
+        // At least base amount must be set (tiered model requires base)
+        require!(base_amount > 0, VouchError::InvalidAmount);
+
+        let campaign = &mut ctx.accounts.campaign;
+        campaign.campaign_id = campaign_id;
+        campaign.creator = ctx.accounts.creator.key();
+        campaign.name = name;
+        campaign.token_mint = token_mint;
+        campaign.base_amount = base_amount;
+        campaign.dev_bonus = dev_bonus;
+        campaign.whale_bonus = whale_bonus;
+        campaign.registration_deadline = registration_deadline;
+        campaign.status = CampaignStatus::Open;
+        campaign.total_registrations = 0;
+        campaign.open_registrations = 0;
+        campaign.dev_registrations = 0;
+        campaign.whale_registrations = 0;
+        campaign.created_at = Clock::get()?.unix_timestamp;
+        campaign.bump = ctx.bumps.campaign;
+
+        emit!(AirdropCampaignCreated {
+            campaign_id,
+            creator: campaign.creator,
+            name: campaign.name.clone(),
+            token_mint,
+            base_amount,
+            dev_bonus,
+            whale_bonus,
+            registration_deadline,
+            timestamp: campaign.created_at,
+        });
+
+        Ok(())
+    }
+
+    /// Register for an airdrop campaign using a verified Vouch credential
+    /// Gets base_amount + bonus (dev_bonus or whale_bonus based on credential)
+    /// Links the user's nullifier to their ShadowWire address for private distribution
+    pub fn register_for_airdrop(
+        ctx: Context<RegisterForAirdrop>,
+        shadow_wire_address: String,
+    ) -> Result<()> {
+        let campaign = &ctx.accounts.campaign;
+        let nullifier_account = &ctx.accounts.nullifier_account;
+        let now = Clock::get()?.unix_timestamp;
+
+        // Verify campaign is open
+        require!(campaign.status == CampaignStatus::Open, VouchError::CampaignNotOpen);
+        require!(now < campaign.registration_deadline, VouchError::RegistrationClosed);
+
+        // Verify nullifier is used (proves user has Vouch credential)
+        require!(nullifier_account.is_used, VouchError::NullifierNotVerified);
+
+        // Validate ShadowWire address format (base58, 32-44 chars)
+        require!(
+            shadow_wire_address.len() >= 32 && shadow_wire_address.len() <= 44,
+            VouchError::InvalidShadowWireAddress
+        );
+
+        // Create registration
+        let registration = &mut ctx.accounts.registration;
+        registration.campaign = campaign.key();
+        registration.nullifier = nullifier_account.nullifier;
+        registration.shadow_wire_address = shadow_wire_address.clone();
+        registration.proof_type = nullifier_account.proof_type;
+        registration.registered_at = now;
+        registration.is_distributed = false;
+        registration.bump = ctx.bumps.registration;
+
+        // Update campaign stats
+        let campaign = &mut ctx.accounts.campaign;
+        campaign.total_registrations = campaign
+            .total_registrations
+            .checked_add(1)
+            .ok_or(VouchError::Overflow)?;
+
+        match nullifier_account.proof_type {
+            ProofType::DeveloperReputation => {
+                campaign.dev_registrations = campaign
+                    .dev_registrations
+                    .checked_add(1)
+                    .ok_or(VouchError::Overflow)?;
+            }
+            ProofType::WhaleTrading => {
+                campaign.whale_registrations = campaign
+                    .whale_registrations
+                    .checked_add(1)
+                    .ok_or(VouchError::Overflow)?;
+            }
+            _ => return Err(VouchError::InvalidProofType.into()),
+        }
+
+        emit!(AirdropRegistration {
+            campaign_id: campaign.campaign_id,
+            nullifier: nullifier_account.nullifier,
+            shadow_wire_address,
+            proof_type: nullifier_account.proof_type,
+            timestamp: now,
+        });
+
+        Ok(())
+    }
+
+    /// Register for an airdrop campaign without verification (open registration)
+    /// Gets only base_amount (no bonus)
+    /// Uses wallet pubkey hash as unique identifier to prevent double registration
+    pub fn register_for_airdrop_open(
+        ctx: Context<RegisterForAirdropOpen>,
+        shadow_wire_address: String,
+    ) -> Result<()> {
+        let campaign = &ctx.accounts.campaign;
+        let now = Clock::get()?.unix_timestamp;
+
+        // Verify campaign is open
+        require!(campaign.status == CampaignStatus::Open, VouchError::CampaignNotOpen);
+        require!(now < campaign.registration_deadline, VouchError::RegistrationClosed);
+
+        // Validate ShadowWire address format (base58, 32-44 chars)
+        require!(
+            shadow_wire_address.len() >= 32 && shadow_wire_address.len() <= 44,
+            VouchError::InvalidShadowWireAddress
+        );
+
+        // Create unique identifier from wallet pubkey (hash to 32 bytes)
+        let wallet_id = ctx.accounts.payer.key().to_bytes();
+
+        // Create registration
+        let registration = &mut ctx.accounts.registration;
+        registration.campaign = campaign.key();
+        registration.nullifier = wallet_id; // Use wallet pubkey as identifier
+        registration.shadow_wire_address = shadow_wire_address.clone();
+        registration.proof_type = ProofType::Unset; // No verification
+        registration.registered_at = now;
+        registration.is_distributed = false;
+        registration.bump = ctx.bumps.registration;
+
+        // Update campaign stats
+        let campaign = &mut ctx.accounts.campaign;
+        campaign.total_registrations = campaign
+            .total_registrations
+            .checked_add(1)
+            .ok_or(VouchError::Overflow)?;
+        campaign.open_registrations = campaign
+            .open_registrations
+            .checked_add(1)
+            .ok_or(VouchError::Overflow)?;
+
+        emit!(AirdropRegistration {
+            campaign_id: campaign.campaign_id,
+            nullifier: wallet_id,
+            shadow_wire_address,
+            proof_type: ProofType::Unset,
+            timestamp: now,
+        });
+
+        Ok(())
+    }
+
+    /// Close registration for a campaign (prevents new registrations)
+    /// Only campaign creator can close
+    pub fn close_airdrop_registration(ctx: Context<CloseAirdropRegistration>) -> Result<()> {
+        let campaign = &mut ctx.accounts.campaign;
+
+        require!(campaign.status == CampaignStatus::Open, VouchError::CampaignNotOpen);
+
+        campaign.status = CampaignStatus::RegistrationClosed;
+
+        emit!(AirdropRegistrationClosed {
+            campaign_id: campaign.campaign_id,
+            total_registrations: campaign.total_registrations,
+            dev_registrations: campaign.dev_registrations,
+            whale_registrations: campaign.whale_registrations,
+            timestamp: Clock::get()?.unix_timestamp,
+        });
+
+        Ok(())
+    }
+
+    /// Mark a registration as distributed (after sending via ShadowWire)
+    /// Only campaign creator can mark distributions
+    pub fn mark_airdrop_distributed(
+        ctx: Context<MarkAirdropDistributed>,
+        tx_signature: String,
+    ) -> Result<()> {
+        let registration = &mut ctx.accounts.registration;
+
+        require!(!registration.is_distributed, VouchError::AlreadyDistributed);
+
+        registration.is_distributed = true;
+        registration.distributed_at = Clock::get()?.unix_timestamp;
+        registration.distribution_tx = tx_signature.clone();
+
+        emit!(AirdropDistributed {
+            campaign_id: ctx.accounts.campaign.campaign_id,
+            nullifier: registration.nullifier,
+            shadow_wire_address: registration.shadow_wire_address.clone(),
+            tx_signature,
+            timestamp: registration.distributed_at,
+        });
+
+        Ok(())
+    }
+
+    /// Complete an airdrop campaign (marks as fully distributed)
+    /// Only campaign creator can complete
+    pub fn complete_airdrop_campaign(ctx: Context<CompleteAirdropCampaign>) -> Result<()> {
+        let campaign = &mut ctx.accounts.campaign;
+
+        require!(
+            campaign.status == CampaignStatus::RegistrationClosed,
+            VouchError::CampaignNotClosed
+        );
+
+        campaign.status = CampaignStatus::Completed;
+        campaign.completed_at = Clock::get()?.unix_timestamp;
+
+        emit!(AirdropCampaignCompleted {
+            campaign_id: campaign.campaign_id,
+            total_distributed: campaign.total_registrations,
+            timestamp: campaign.completed_at,
+        });
+
+        Ok(())
+    }
 }
 
 // === Helper Functions ===
@@ -682,6 +931,132 @@ pub struct InitNullifier<'info> {
     pub system_program: Program<'info, System>,
 }
 
+// === Airdrop Registry Accounts ===
+
+#[derive(Accounts)]
+#[instruction(campaign_id: [u8; 32])]
+pub struct CreateAirdropCampaign<'info> {
+    #[account(
+        init,
+        payer = creator,
+        space = 8 + AirdropCampaign::INIT_SPACE,
+        seeds = [b"airdrop_campaign", campaign_id.as_ref()],
+        bump
+    )]
+    pub campaign: Account<'info, AirdropCampaign>,
+
+    #[account(mut)]
+    pub creator: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct RegisterForAirdrop<'info> {
+    #[account(
+        mut,
+        seeds = [b"airdrop_campaign", campaign.campaign_id.as_ref()],
+        bump = campaign.bump,
+        constraint = campaign.status == CampaignStatus::Open @ VouchError::CampaignNotOpen
+    )]
+    pub campaign: Account<'info, AirdropCampaign>,
+
+    #[account(
+        seeds = [b"nullifier", nullifier_account.nullifier.as_ref()],
+        bump = nullifier_account.bump,
+        constraint = nullifier_account.is_used @ VouchError::NullifierNotVerified
+    )]
+    pub nullifier_account: Account<'info, NullifierAccount>,
+
+    #[account(
+        init,
+        payer = payer,
+        space = 8 + AirdropRegistrationAccount::INIT_SPACE,
+        seeds = [b"airdrop_registration", campaign.key().as_ref(), nullifier_account.nullifier.as_ref()],
+        bump
+    )]
+    pub registration: Account<'info, AirdropRegistrationAccount>,
+
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(shadow_wire_address: String)]
+pub struct RegisterForAirdropOpen<'info> {
+    #[account(
+        mut,
+        seeds = [b"airdrop_campaign", campaign.campaign_id.as_ref()],
+        bump = campaign.bump,
+        constraint = campaign.status == CampaignStatus::Open @ VouchError::CampaignNotOpen
+    )]
+    pub campaign: Account<'info, AirdropCampaign>,
+
+    #[account(
+        init,
+        payer = payer,
+        space = 8 + AirdropRegistrationAccount::INIT_SPACE,
+        seeds = [b"airdrop_registration", campaign.key().as_ref(), payer.key().as_ref()],
+        bump
+    )]
+    pub registration: Account<'info, AirdropRegistrationAccount>,
+
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CloseAirdropRegistration<'info> {
+    #[account(
+        mut,
+        seeds = [b"airdrop_campaign", campaign.campaign_id.as_ref()],
+        bump = campaign.bump,
+        constraint = campaign.creator == creator.key() @ VouchError::Unauthorized
+    )]
+    pub campaign: Account<'info, AirdropCampaign>,
+
+    #[account(mut)]
+    pub creator: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct MarkAirdropDistributed<'info> {
+    #[account(
+        seeds = [b"airdrop_campaign", campaign.campaign_id.as_ref()],
+        bump = campaign.bump,
+        constraint = campaign.creator == creator.key() @ VouchError::Unauthorized
+    )]
+    pub campaign: Account<'info, AirdropCampaign>,
+
+    #[account(
+        mut,
+        seeds = [b"airdrop_registration", campaign.key().as_ref(), registration.nullifier.as_ref()],
+        bump = registration.bump,
+        constraint = registration.campaign == campaign.key() @ VouchError::InvalidCampaign
+    )]
+    pub registration: Account<'info, AirdropRegistrationAccount>,
+
+    #[account(mut)]
+    pub creator: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct CompleteAirdropCampaign<'info> {
+    #[account(
+        mut,
+        seeds = [b"airdrop_campaign", campaign.campaign_id.as_ref()],
+        bump = campaign.bump,
+        constraint = campaign.creator == creator.key() @ VouchError::Unauthorized
+    )]
+    pub campaign: Account<'info, AirdropCampaign>,
+
+    #[account(mut)]
+    pub creator: Signer<'info>,
+}
 
 // === State ===
 
@@ -761,6 +1136,79 @@ pub enum ProofType {
     WhaleTrading,
 }
 
+// === Airdrop Registry State ===
+
+#[account]
+#[derive(InitSpace)]
+pub struct AirdropCampaign {
+    /// Unique campaign identifier (hash)
+    pub campaign_id: [u8; 32],
+    /// Campaign creator (project distributing tokens)
+    pub creator: Pubkey,
+    /// Human-readable campaign name
+    #[max_len(64)]
+    pub name: String,
+    /// Token mint for the airdrop
+    pub token_mint: Pubkey,
+    /// Base amount for anyone (tiered: open registration)
+    pub base_amount: u64,
+    /// Bonus amount for verified developers (gets base + dev_bonus)
+    pub dev_bonus: u64,
+    /// Bonus amount for verified whales (gets base + whale_bonus)
+    pub whale_bonus: u64,
+    /// Registration deadline (unix timestamp)
+    pub registration_deadline: i64,
+    /// Campaign status
+    pub status: CampaignStatus,
+    /// Total number of registrations
+    pub total_registrations: u32,
+    /// Number of open (unverified) registrations
+    pub open_registrations: u32,
+    /// Number of developer registrations
+    pub dev_registrations: u32,
+    /// Number of whale registrations
+    pub whale_registrations: u32,
+    /// Campaign creation timestamp
+    pub created_at: i64,
+    /// Campaign completion timestamp (0 if not completed)
+    pub completed_at: i64,
+    /// PDA bump
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct AirdropRegistrationAccount {
+    /// Campaign this registration belongs to
+    pub campaign: Pubkey,
+    /// Nullifier from the Vouch credential
+    pub nullifier: [u8; 32],
+    /// User's ShadowWire address for private receipt
+    #[max_len(44)]
+    pub shadow_wire_address: String,
+    /// Type of credential (dev or whale)
+    pub proof_type: ProofType,
+    /// Registration timestamp
+    pub registered_at: i64,
+    /// Whether tokens have been distributed
+    pub is_distributed: bool,
+    /// Distribution timestamp (0 if not distributed)
+    pub distributed_at: i64,
+    /// Distribution transaction signature
+    #[max_len(88)]
+    pub distribution_tx: String,
+    /// PDA bump
+    pub bump: u8,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace, Default)]
+pub enum CampaignStatus {
+    #[default]
+    Open,
+    RegistrationClosed,
+    Completed,
+}
+
 // === Events ===
 
 #[event]
@@ -838,6 +1286,55 @@ pub struct CommitmentCreated {
     pub timestamp: i64,
 }
 
+// === Airdrop Events ===
+
+#[event]
+pub struct AirdropCampaignCreated {
+    pub campaign_id: [u8; 32],
+    pub creator: Pubkey,
+    pub name: String,
+    pub token_mint: Pubkey,
+    pub base_amount: u64,
+    pub dev_bonus: u64,
+    pub whale_bonus: u64,
+    pub registration_deadline: i64,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct AirdropRegistration {
+    pub campaign_id: [u8; 32],
+    pub nullifier: [u8; 32],
+    pub shadow_wire_address: String,
+    pub proof_type: ProofType,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct AirdropRegistrationClosed {
+    pub campaign_id: [u8; 32],
+    pub total_registrations: u32,
+    pub dev_registrations: u32,
+    pub whale_registrations: u32,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct AirdropDistributed {
+    pub campaign_id: [u8; 32],
+    pub nullifier: [u8; 32],
+    pub shadow_wire_address: String,
+    pub tx_signature: String,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct AirdropCampaignCompleted {
+    pub campaign_id: [u8; 32],
+    pub total_distributed: u32,
+    pub timestamp: i64,
+}
+
 // === Errors ===
 
 #[error_code]
@@ -885,4 +1382,36 @@ pub enum VouchError {
 
     #[msg("Arithmetic overflow")]
     Overflow,
+
+    // === Airdrop Errors ===
+
+    #[msg("Campaign name too long (max 64 chars)")]
+    NameTooLong,
+
+    #[msg("Registration deadline must be in the future")]
+    InvalidDeadline,
+
+    #[msg("Amount must be greater than zero")]
+    InvalidAmount,
+
+    #[msg("Campaign is not open for registration")]
+    CampaignNotOpen,
+
+    #[msg("Campaign registration period has closed")]
+    RegistrationClosed,
+
+    #[msg("Nullifier has not been verified (no Vouch credential)")]
+    NullifierNotVerified,
+
+    #[msg("Invalid ShadowWire address format")]
+    InvalidShadowWireAddress,
+
+    #[msg("Airdrop has already been distributed to this registration")]
+    AlreadyDistributed,
+
+    #[msg("Campaign must be closed before completing")]
+    CampaignNotClosed,
+
+    #[msg("Registration does not belong to this campaign")]
+    InvalidCampaign,
 }

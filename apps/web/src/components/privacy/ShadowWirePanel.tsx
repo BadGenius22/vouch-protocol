@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useUnifiedWallet } from '@jup-ag/wallet-adapter';
 import {
   getShadowBalance,
   privateTransfer,
@@ -40,7 +40,7 @@ interface ShadowWirePanelProps {
 }
 
 export function ShadowWirePanel({ className }: ShadowWirePanelProps) {
-  const wallet = useWallet();
+  const wallet = useUnifiedWallet();
 
   // SDK state
   const [isAvailable, setIsAvailable] = useState<boolean | null>(null);

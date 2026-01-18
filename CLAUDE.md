@@ -166,7 +166,7 @@ export async function loadCircuit(circuitType: CircuitType) {
 ```bash
 NEXT_PUBLIC_SOLANA_NETWORK=devnet
 NEXT_PUBLIC_SOLANA_RPC_URL=https://api.devnet.solana.com
-NEXT_PUBLIC_VERIFIER_PROGRAM_ID=VouchXXX...
+NEXT_PUBLIC_VERIFIER_PROGRAM_ID=EhSkCuohWP8Sdfq6yHoKih6r2rsNoYYPZZSfpnyELuaD
 HELIUS_API_KEY=xxx  # Server-side only (optional - falls back to mock)
 ```
 

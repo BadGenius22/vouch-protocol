@@ -1,47 +1,27 @@
 'use client';
 
-import { useWalletModal } from '@solana/wallet-adapter-react-ui';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { UnifiedWalletButton } from '@jup-ag/wallet-adapter';
 import { Button } from '@/components/ui/button';
-import { Wallet, LogOut } from 'lucide-react';
+import { Wallet } from 'lucide-react';
+import { useWalletReady } from '@/components/providers';
 
 export function WalletButton() {
-  const { setVisible } = useWalletModal();
-  const { publicKey, disconnect, connecting } = useWallet();
+  const walletReady = useWalletReady();
 
-  if (publicKey) {
-    const addr = publicKey.toBase58();
+  // Show placeholder during SSR or before wallet providers mount
+  if (!walletReady) {
     return (
-      <div className="flex items-center gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          className="font-mono"
-          aria-label={`Connected wallet: ${addr}`}
-        >
-          {addr.slice(0, 4)}...{addr.slice(-4)}
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={disconnect}
-          aria-label="Disconnect wallet"
-        >
-          <LogOut className="h-4 w-4" aria-hidden="true" />
-        </Button>
-      </div>
+      <Button disabled aria-label="Loading wallet...">
+        <Wallet className="mr-2 h-4 w-4" aria-hidden="true" />
+        Connect
+      </Button>
     );
   }
 
   return (
-    <Button
-      onClick={() => setVisible(true)}
-      disabled={connecting}
-      aria-busy={connecting}
-      aria-label={connecting ? 'Connecting to wallet...' : 'Connect wallet'}
-    >
-      <Wallet className="mr-2 h-4 w-4" aria-hidden="true" />
-      {connecting ? 'Connecting...' : 'Connect'}
-    </Button>
+    <UnifiedWalletButton
+      buttonClassName="!bg-primary !text-primary-foreground hover:!bg-primary/90 !rounded-md !px-4 !py-2 !text-sm !font-medium !transition-colors"
+      currentUserClassName="!bg-muted !text-foreground !rounded-md !px-3 !py-2 !text-sm !font-mono"
+    />
   );
 }

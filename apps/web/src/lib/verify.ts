@@ -49,8 +49,8 @@ function isValidHex64(hex: string): boolean {
 
 // === Constants ===
 
-/** Default verifier program ID (update after deployment) */
-const DEFAULT_PROGRAM_ID = 'CwWhTbquAFY5dvEMctwWHddWvdsDVAxWmtGPUt6s6UxQ';
+/** Default verifier program ID (deployed to devnet) */
+const DEFAULT_PROGRAM_ID = 'EhSkCuohWP8Sdfq6yHoKih6r2rsNoYYPZZSfpnyELuaD';
 
 /** PDA seeds */
 const NULLIFIER_SEED = 'nullifier';

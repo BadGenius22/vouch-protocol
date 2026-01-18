@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { WalletButton } from '@/components/wallet/wallet-button';
 import { cn } from '@/lib/utils';
-import { Menu, X, Code2, Wallet, Home } from 'lucide-react';
+import { Menu, X, Code2, Wallet, Home, Gift } from 'lucide-react';
 
 export function Header() {
   const pathname = usePathname();
@@ -26,6 +26,7 @@ export function Header() {
   const navLinks = [
     { href: '/developer', label: 'Developer', icon: Code2 },
     { href: '/whale', label: 'Whale', icon: Wallet },
+    { href: '/airdrop', label: 'Airdrops', icon: Gift },
   ];
 
   return (

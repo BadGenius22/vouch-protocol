@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useUnifiedWallet } from '@jup-ag/wallet-adapter';
 import {
   getShadowBalance,
   claimAirdropToWallet,
@@ -28,7 +28,7 @@ interface AirdropClaimProps {
 type ClaimStatus = 'idle' | 'loading' | 'success' | 'error' | 'no-balance';
 
 export function AirdropClaim({ token = 'SOL', className }: AirdropClaimProps) {
-  const wallet = useWallet();
+  const wallet = useUnifiedWallet();
 
   const [isAvailable, setIsAvailable] = useState<boolean | null>(null);
   const [balance, setBalance] = useState<number>(0);

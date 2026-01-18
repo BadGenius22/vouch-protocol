@@ -39,6 +39,41 @@ export * from './connection';
 export * from './privacy-cash';
 export * from './shadowwire';
 
+// === Private Airdrop Registry (Tiered Rewards) ===
+export {
+  // Types
+  type AirdropCampaign,
+  type CampaignStatus,
+  type AirdropRegistration,
+  type CreateCampaignParams,
+  type RegisterForAirdropParams,
+  type DistributionProgress,
+  // PDA Derivation
+  getCampaignPDA,
+  getRegistrationPDA,
+  getOpenRegistrationPDA,
+  getNullifierPDA,
+  generateCampaignId,
+  generateCampaignIdAsync,
+  // Instruction Builders
+  buildCreateCampaignInstruction,
+  buildRegisterForAirdropInstruction,
+  buildRegisterForAirdropOpenInstruction,
+  buildCloseRegistrationInstruction,
+  buildMarkDistributedInstruction,
+  buildCompleteCampaignInstruction,
+  // High-Level Functions
+  fetchCampaign,
+  fetchCampaignRegistrations,
+  isRegisteredForCampaign,
+  isOpenRegisteredForCampaign,
+  distributeAirdropPrivately,
+  // Validation & Helpers
+  validateCampaignParams,
+  validateShadowWireAddress,
+  calculateAirdropAmount,
+} from './airdrop-registry';
+
 // === Privacy Utilities (for advanced usage) ===
 export {
   createLogger,

@@ -1,43 +1,89 @@
 'use client';
 
-import { useMemo, useEffect } from 'react';
-import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
-import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
-import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
-import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets';
-import { clusterApiUrl } from '@solana/web3.js';
+import { useEffect, useState, useMemo, createContext, useContext } from 'react';
+import { UnifiedWalletProvider } from '@jup-ag/wallet-adapter';
+import { Connection, clusterApiUrl } from '@solana/web3.js';
 
-import '@solana/wallet-adapter-react-ui/styles.css';
+// Context to track if wallet providers are ready
+const WalletReadyContext = createContext(false);
+export const useWalletReady = () => useContext(WalletReadyContext);
+
+// Connection context for Solana RPC
+const ConnectionContext = createContext<Connection | null>(null);
+export const useSolanaConnection = () => {
+  const connection = useContext(ConnectionContext);
+  if (!connection) {
+    throw new Error('useSolanaConnection must be used within Providers');
+  }
+  return connection;
+};
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  const network = (process.env.NEXT_PUBLIC_SOLANA_NETWORK as WalletAdapterNetwork) || WalletAdapterNetwork.Devnet;
-  const endpoint = useMemo(() => process.env.NEXT_PUBLIC_SOLANA_RPC_URL || clusterApiUrl(network), [network]);
-  const wallets = useMemo(() => [new PhantomWalletAdapter(), new SolflareWalletAdapter()], []);
+  // Track client-side mounting to prevent SSR issues with wallet adapter
+  const [mounted, setMounted] = useState(false);
+
+  // Create connection once
+  const connection = useMemo(() => {
+    const endpoint = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ||
+      clusterApiUrl((process.env.NEXT_PUBLIC_SOLANA_NETWORK as 'mainnet-beta' | 'devnet') || 'devnet');
+    return new Connection(endpoint, 'confirmed');
+  }, []);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Preload Noir circuits in the background for better UX
-  // This initializes WASM and caches circuits before user needs them
   useEffect(() => {
+    if (!mounted) return;
+
     const preloadCircuits = async () => {
       try {
-        // Dynamic import to avoid SSR issues with WASM
         const { preloadCircuits: preload } = await import('@/lib/circuit');
         await preload();
       } catch (error) {
-        // Preloading is best-effort, don't block on errors
         console.warn('[Vouch] Circuit preload failed:', error);
       }
     };
 
-    // Delay preloading to not block initial render
     const timeoutId = setTimeout(preloadCircuits, 1000);
     return () => clearTimeout(timeoutId);
-  }, []);
+  }, [mounted]);
+
+  // During SSR or before mount, render children without wallet context
+  // Components using wallet hooks should check useWalletReady() first
+  if (!mounted) {
+    return (
+      <WalletReadyContext.Provider value={false}>
+        {children}
+      </WalletReadyContext.Provider>
+    );
+  }
 
   return (
-    <ConnectionProvider endpoint={endpoint}>
-      <WalletProvider wallets={wallets} autoConnect>
-        <WalletModalProvider>{children}</WalletModalProvider>
-      </WalletProvider>
-    </ConnectionProvider>
+    <WalletReadyContext.Provider value={true}>
+      <ConnectionContext.Provider value={connection}>
+        <UnifiedWalletProvider
+          wallets={[]}
+          config={{
+            autoConnect: false,
+            env: (process.env.NEXT_PUBLIC_SOLANA_NETWORK as 'mainnet-beta' | 'devnet') || 'devnet',
+            metadata: {
+              name: 'Vouch Protocol',
+              description: 'Zero-knowledge reputation proofs on Solana',
+              url: 'https://vouch.dev',
+              iconUrls: ['/logo.png'],
+            },
+            walletlistExplanation: {
+              href: 'https://station.jup.ag/docs/additional-topics/wallet-list',
+            },
+            theme: 'dark',
+            lang: 'en',
+          }}
+        >
+          {children}
+        </UnifiedWalletProvider>
+      </ConnectionContext.Provider>
+    </WalletReadyContext.Provider>
   );
 }

@@ -9,7 +9,7 @@ import { HeroCanvas } from '@/components/three/hero-canvas';
 import { GlowButton } from '@/components/ui/glow-button';
 import { GlowCard, GlowCardHeader, GlowCardTitle, GlowCardDescription, GlowCardContent } from '@/components/ui/glow-card';
 import { AnimatedCounter } from '@/components/ui/animated-counter';
-import { Shield, Code2, Wallet, ChevronDown, Zap, Lock, Eye, Github, ArrowRight } from 'lucide-react';
+import { Shield, Code2, Wallet, ChevronDown, Zap, Lock, Eye, Github, ArrowRight, Gift } from 'lucide-react';
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 
@@ -257,12 +257,13 @@ export default function HomePage() {
         <div className="container mx-auto px-4 relative z-10">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-5xl font-display font-bold mb-4">
-              Built for <span className="text-secondary text-glow-purple">Builders</span> &{' '}
-              <span className="text-accent text-glow-green">Traders</span>
+              Built for <span className="text-secondary text-glow-purple">Builders</span>,{' '}
+              <span className="text-accent text-glow-green">Traders</span> &{' '}
+              <span className="text-primary text-glow-cyan">Projects</span>
             </h2>
           </div>
 
-          <div className="grid lg:grid-cols-2 gap-8">
+          <div className="grid lg:grid-cols-3 gap-8">
             {/* Developer Card */}
             <GlowCard className="use-case-card p-8" glowColor="cyan" hover>
               <div className="flex items-start gap-4 mb-6">
@@ -322,6 +323,38 @@ export default function HomePage() {
               <Link href="/whale">
                 <GlowButton variant="outline" glowColor="purple" className="w-full sm:w-auto">
                   Start Whale Proof
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </GlowButton>
+              </Link>
+            </GlowCard>
+
+            {/* Airdrop Card */}
+            <GlowCard className="use-case-card p-8" glowColor="green" hover>
+              <div className="flex items-start gap-4 mb-6">
+                <div className="p-3 rounded-xl bg-accent/10 border border-accent/20">
+                  <Gift className="w-8 h-8 text-accent" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-display font-bold">Private Airdrops</h3>
+                  <p className="text-muted-foreground">Receive tokens anonymously</p>
+                </div>
+              </div>
+              <ul className="space-y-4 mb-8">
+                {[
+                  'Register with your Vouch credential',
+                  'Receive tokens via ShadowWire',
+                  'Amounts hidden from everyone',
+                  'Claim to any wallet privately',
+                ].map((item, i) => (
+                  <li key={i} className="flex items-center gap-3 text-sm">
+                    <div className="w-1.5 h-1.5 rounded-full bg-accent shadow-neon-green" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+              <Link href="/airdrop">
+                <GlowButton variant="outline" glowColor="green" className="w-full sm:w-auto">
+                  Browse Airdrops
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </GlowButton>
               </Link>
