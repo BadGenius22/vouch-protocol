@@ -136,10 +136,11 @@ export function signAttestation(result: VerificationResult): SignedAttestation {
     result,
     verifier: verifierKeypair!.publicKey.toBase58(),
     signature: bs58.encode(signatureBytes),
-    signatureBytes: signatureBytes,
+    // Convert Uint8Array to regular array for JSON serialization
+    signatureBytes: Array.from(signatureBytes),
     attestationHash: attestationHash.toString('hex'),
-    attestationHashBytes: attestationHash,
-    messageBytes: messageBytes,
+    attestationHashBytes: Array.from(attestationHash),
+    messageBytes: Array.from(messageBytes),
   };
 }
 
@@ -180,9 +181,12 @@ export function verifyAttestationSignature(attestation: SignedAttestation): bool
   const bs58 = require('bs58');
 
   // Use the stored messageBytes if available, otherwise rebuild
+  // Handle both array (from JSON) and Uint8Array formats
   let messageBytes: Uint8Array;
-  if (attestation.messageBytes) {
-    messageBytes = attestation.messageBytes;
+  if (attestation.messageBytes && Array.isArray(attestation.messageBytes)) {
+    messageBytes = new Uint8Array(attestation.messageBytes);
+  } else if (attestation.messageBytes) {
+    messageBytes = new Uint8Array(attestation.messageBytes);
   } else {
     // Rebuild message from result
     const proofTypeValue = PROOF_TYPE_VALUES[attestation.result.proofType] || 0;
@@ -190,8 +194,9 @@ export function verifyAttestationSignature(attestation: SignedAttestation): bool
       ? attestation.result.nullifier.slice(2)
       : attestation.result.nullifier;
     const nullifierBytes = Buffer.from(nullifierHex, 'hex');
-    const attestationHashBytes = attestation.attestationHashBytes ||
-      Buffer.from(attestation.attestationHash, 'hex');
+    const attestationHashBytes = attestation.attestationHashBytes
+      ? new Uint8Array(attestation.attestationHashBytes)
+      : Buffer.from(attestation.attestationHash, 'hex');
 
     messageBytes = buildAttestationMessage(
       proofTypeValue,
@@ -200,7 +205,10 @@ export function verifyAttestationSignature(attestation: SignedAttestation): bool
     );
   }
 
-  const signature = attestation.signatureBytes || bs58.decode(attestation.signature);
+  // Handle both array (from JSON) and Uint8Array formats for signature
+  const signature = attestation.signatureBytes
+    ? new Uint8Array(attestation.signatureBytes)
+    : bs58.decode(attestation.signature);
   const publicKey = bs58.decode(attestation.verifier);
 
   return nacl.sign.detached.verify(messageBytes, signature, publicKey);

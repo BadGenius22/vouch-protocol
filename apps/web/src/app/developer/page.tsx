@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useUnifiedWallet } from '@jup-ag/wallet-adapter';
 import { useWalletReady, useSolanaConnection } from '@/components/providers';
 import { GlowCard } from '@/components/ui/glow-card';
@@ -10,9 +10,9 @@ import { ProofLoading } from '@/components/ui/proof-loading';
 import { WalletButton } from '@/components/wallet/wallet-button';
 import { getDeployedPrograms } from '@/app/actions/helius';
 import type { ProgramData, ProofResult, VerificationResult } from '@/lib/types';
-import { CheckCircle, XCircle, ExternalLink, Code2, Shield, ArrowRight, Loader2 } from 'lucide-react';
+import { CheckCircle, XCircle, ExternalLink, Code2, Shield, ArrowRight, Loader2, BadgeCheck } from 'lucide-react';
 
-type Step = 'connect' | 'fetch' | 'generate' | 'verify' | 'complete';
+type Step = 'connect' | 'checking' | 'already-verified' | 'fetch' | 'generate' | 'verify' | 'complete';
 
 const STEPS = [
   { id: 'connect', label: 'Connect' },
@@ -50,6 +50,50 @@ function DeveloperPageContent() {
   const [proofResult, setProofResult] = useState<ProofResult | null>(null);
   const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null);
   const [proofProgress, setProofProgress] = useState(0);
+  const [existingNullifier, setExistingNullifier] = useState<string | null>(null);
+
+  // Check if wallet has already verified when connected
+  useEffect(() => {
+    async function checkExistingVerification() {
+      if (!wallet.publicKey) {
+        setStep('connect');
+        setExistingNullifier(null);
+        return;
+      }
+
+      setStep('checking');
+
+      try {
+        const { computeNullifierForWallet } = await import('@/lib/proof');
+        const { isNullifierUsed, isProgramDeployed } = await import('@/lib/verify');
+
+        // Check if program is deployed
+        const deployed = await isProgramDeployed(connection);
+        if (!deployed) {
+          setStep('connect');
+          return;
+        }
+
+        // Compute nullifier for this wallet + developer proof type
+        const nullifier = await computeNullifierForWallet(wallet.publicKey.toBase58(), 'developer');
+
+        // Check if nullifier has been used
+        const used = await isNullifierUsed(connection, nullifier);
+
+        if (used) {
+          setExistingNullifier(nullifier);
+          setStep('already-verified');
+        } else {
+          setStep('connect');
+        }
+      } catch (err) {
+        console.error('Error checking existing verification:', err);
+        setStep('connect');
+      }
+    }
+
+    checkExistingVerification();
+  }, [wallet.publicKey, connection]);
 
   const getCompletedSteps = (): string[] => {
     const stepOrder = ['connect', 'fetch', 'generate', 'verify', 'complete'];
@@ -117,7 +161,9 @@ function DeveloperPageContent() {
     setError(null);
 
     try {
-      const { submitProofToChain, isProgramDeployed } = await import('@/lib/verify');
+      const { isProgramDeployed } = await import('@/lib/verify');
+      const { submitProofWithVerifier, isVerifierAvailable } = await import('@/lib/verifier-client');
+
       const deployed = await isProgramDeployed(connection);
 
       if (!deployed) {
@@ -130,7 +176,15 @@ function DeveloperPageContent() {
         return;
       }
 
-      const result = await submitProofToChain(
+      // Check if verifier service is available
+      const verifierAvailable = await isVerifierAvailable();
+      if (!verifierAvailable) {
+        setError('Verifier service is not available. Please try again later.');
+        setLoading(false);
+        return;
+      }
+
+      const result = await submitProofWithVerifier(
         connection,
         proofResult,
         'developer',
@@ -229,6 +283,43 @@ function DeveloperPageContent() {
                   </GlowButton>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Checking Step - Verifying if already proven */}
+          {step === 'checking' && (
+            <div className="text-center py-8">
+              <Loader2 className="w-12 h-12 text-primary animate-spin mx-auto mb-4" />
+              <h3 className="text-xl font-display font-semibold mb-2">Checking Verification Status</h3>
+              <p className="text-muted-foreground">
+                Verifying if this wallet has already proven developer reputation...
+              </p>
+            </div>
+          )}
+
+          {/* Already Verified Step */}
+          {step === 'already-verified' && (
+            <div className="text-center py-8">
+              <div className="w-20 h-20 rounded-full bg-accent/10 border border-accent/30 flex items-center justify-center mx-auto mb-6 shadow-neon-green">
+                <BadgeCheck className="w-10 h-10 text-accent" />
+              </div>
+              <h3 className="text-2xl font-display font-bold text-accent text-glow-green mb-2">
+                Already Verified!
+              </h3>
+              <p className="text-muted-foreground mb-6">
+                This wallet has already proven developer reputation on-chain.
+              </p>
+              <div className="p-4 rounded-xl bg-muted/50 border border-border/50 max-w-md mx-auto">
+                <p className="text-xs text-muted-foreground font-mono uppercase tracking-wider mb-2">
+                  Nullifier Hash
+                </p>
+                <p className="font-mono text-xs text-primary break-all">
+                  {existingNullifier?.slice(0, 32)}...
+                </p>
+              </div>
+              <p className="text-xs text-muted-foreground mt-4">
+                Each wallet can only verify once per proof type to prevent double-proving.
+              </p>
             </div>
           )}
 

@@ -15,7 +15,7 @@ import {
   type AirdropCampaign,
   validateShadowWireAddress,
 } from '@/lib/airdrop-registry';
-import { Loader2 } from 'lucide-react';
+import { Loader2, BadgeCheck, Code2, TrendingUp } from 'lucide-react';
 
 type PageState = 'browse' | 'register' | 'claim';
 
@@ -92,6 +92,11 @@ function AirdropPageContent() {
   const [currentStep, setCurrentStep] = useState('connect');
   const [completedSteps, setCompletedSteps] = useState<string[]>([]);
   const [nullifier, setNullifier] = useState<string | null>(null);
+  const [verificationStatus, setVerificationStatus] = useState<{
+    checking: boolean;
+    devVerified: boolean;
+    whaleVerified: boolean;
+  }>({ checking: false, devVerified: false, whaleVerified: false });
 
   // Determine current step based on wallet and nullifier
   // Note: Proof step is optional - users can skip to register
@@ -127,6 +132,58 @@ function AirdropPageContent() {
       }
     }
   }, []);
+
+  // Check on-chain verification status when wallet connects
+  useEffect(() => {
+    async function checkVerificationStatus() {
+      if (!wallet.publicKey) {
+        setVerificationStatus({ checking: false, devVerified: false, whaleVerified: false });
+        return;
+      }
+
+      setVerificationStatus(prev => ({ ...prev, checking: true }));
+
+      try {
+        const { computeNullifierForWallet } = await import('@/lib/proof');
+        const { isNullifierUsed, isProgramDeployed } = await import('@/lib/verify');
+
+        // Check if program is deployed
+        const deployed = await isProgramDeployed(connection);
+        if (!deployed) {
+          setVerificationStatus({ checking: false, devVerified: false, whaleVerified: false });
+          return;
+        }
+
+        // Check dev verification
+        const devNullifier = computeNullifierForWallet(wallet.publicKey.toBase58(), 'developer');
+        const devUsed = await isNullifierUsed(connection, devNullifier);
+
+        // Check whale verification
+        const whaleNullifier = computeNullifierForWallet(wallet.publicKey.toBase58(), 'whale');
+        const whaleUsed = await isNullifierUsed(connection, whaleNullifier);
+
+        setVerificationStatus({
+          checking: false,
+          devVerified: devUsed,
+          whaleVerified: whaleUsed,
+        });
+
+        // Store the appropriate nullifier if verified
+        if (devUsed && typeof window !== 'undefined') {
+          localStorage.setItem('vouch_nullifier', devNullifier);
+          setNullifier(devNullifier);
+        } else if (whaleUsed && typeof window !== 'undefined') {
+          localStorage.setItem('vouch_nullifier', whaleNullifier);
+          setNullifier(whaleNullifier);
+        }
+      } catch (err) {
+        console.error('Error checking verification status:', err);
+        setVerificationStatus({ checking: false, devVerified: false, whaleVerified: false });
+      }
+    }
+
+    checkVerificationStatus();
+  }, [wallet.publicKey, connection]);
 
   const handleSelectCampaign = (campaign: AirdropCampaign) => {
     setSelectedCampaign(campaign);
@@ -217,32 +274,65 @@ function AirdropPageContent() {
           </GlowCard>
         )}
 
-        {/* Optional Verification Info - Only show when browsing */}
-        {wallet.publicKey && !nullifier && pageState === 'browse' && (
-          <GlowCard className="max-w-md mx-auto mb-8 border-cyan-500/30 bg-gradient-to-r from-cyan-500/5 to-purple-500/5">
+        {/* Verification Status - Show when wallet connected and browsing */}
+        {wallet.publicKey && pageState === 'browse' && (
+          <GlowCard className="max-w-lg mx-auto mb-8 border-cyan-500/30 bg-gradient-to-r from-cyan-500/5 to-purple-500/5">
             <div className="p-6">
-              <h3 className="text-lg font-semibold text-cyan-400 mb-2">
-                🎁 Want Bonus Tokens?
-              </h3>
-              <p className="text-slate-400 mb-4">
-                Anyone can register for airdrops! Complete a proof to unlock <span className="text-cyan-400 font-medium">dev bonus</span> or <span className="text-purple-400 font-medium">whale bonus</span> rewards.
-              </p>
-              <div className="flex gap-4 justify-center">
-                <GlowButton
-                  variant="outline"
-                  onClick={() => window.location.href = '/developer'}
-                  className="border-cyan-500/50 hover:border-cyan-400"
-                >
-                  Dev Proof (+bonus)
-                </GlowButton>
-                <GlowButton
-                  variant="outline"
-                  onClick={() => window.location.href = '/whale'}
-                  className="border-purple-500/50 hover:border-purple-400"
-                >
-                  Whale Proof (+bonus)
-                </GlowButton>
-              </div>
+              {verificationStatus.checking ? (
+                <div className="text-center py-2">
+                  <Loader2 className="w-6 h-6 text-cyan-400 animate-spin mx-auto mb-2" />
+                  <p className="text-slate-400 text-sm">Checking verification status...</p>
+                </div>
+              ) : (verificationStatus.devVerified || verificationStatus.whaleVerified) ? (
+                <>
+                  <h3 className="text-lg font-semibold text-green-400 mb-3 flex items-center gap-2">
+                    <BadgeCheck className="w-5 h-5" />
+                    Verification Status
+                  </h3>
+                  <div className="flex gap-4 justify-center mb-3">
+                    {verificationStatus.devVerified && (
+                      <div className="flex items-center gap-2 px-4 py-2 bg-cyan-900/30 border border-cyan-500/30 rounded-lg">
+                        <Code2 className="w-4 h-4 text-cyan-400" />
+                        <span className="text-cyan-300 font-medium">Developer Verified</span>
+                      </div>
+                    )}
+                    {verificationStatus.whaleVerified && (
+                      <div className="flex items-center gap-2 px-4 py-2 bg-purple-900/30 border border-purple-500/30 rounded-lg">
+                        <TrendingUp className="w-4 h-4 text-purple-400" />
+                        <span className="text-purple-300 font-medium">Whale Verified</span>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-slate-400 text-sm text-center">
+                    You&apos;re eligible for bonus rewards when registering for airdrops!
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h3 className="text-lg font-semibold text-cyan-400 mb-2">
+                    🎁 Want Bonus Tokens?
+                  </h3>
+                  <p className="text-slate-400 mb-4">
+                    Anyone can register for airdrops! Complete a proof to unlock <span className="text-cyan-400 font-medium">dev bonus</span> or <span className="text-purple-400 font-medium">whale bonus</span> rewards.
+                  </p>
+                  <div className="flex gap-4 justify-center">
+                    <GlowButton
+                      variant="outline"
+                      onClick={() => window.location.href = '/developer'}
+                      className="border-cyan-500/50 hover:border-cyan-400"
+                    >
+                      Dev Proof (+bonus)
+                    </GlowButton>
+                    <GlowButton
+                      variant="outline"
+                      onClick={() => window.location.href = '/whale'}
+                      className="border-purple-500/50 hover:border-purple-400"
+                    >
+                      Whale Proof (+bonus)
+                    </GlowButton>
+                  </div>
+                </>
+              )}
             </div>
           </GlowCard>
         )}

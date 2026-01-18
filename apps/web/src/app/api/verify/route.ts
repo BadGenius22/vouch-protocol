@@ -40,12 +40,22 @@ export async function POST(request: NextRequest) {
     console.log(`[API/verify] Proof size: ${proof.length} chars`);
 
     // Verify the proof
-    const result = await verifyProof(proof, publicInputs, proofType, nullifier, commitment);
+    let result;
+    try {
+      result = await verifyProof(proof, publicInputs, proofType, nullifier, commitment);
+    } catch (verifyError) {
+      console.error('[API/verify] verifyProof threw:', verifyError);
+      const response: VerifyResponse = {
+        success: false,
+        error: `Proof verification error: ${verifyError instanceof Error ? verifyError.message : 'Unknown error'}`,
+      };
+      return NextResponse.json(response, { status: 400 });
+    }
 
     if (!result.isValid) {
       const response: VerifyResponse = {
         success: false,
-        error: 'Proof verification failed',
+        error: 'Proof verification failed - proof is invalid',
       };
       return NextResponse.json(response, { status: 400 });
     }

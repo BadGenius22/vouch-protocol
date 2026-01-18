@@ -39,14 +39,14 @@ export interface SignedAttestation {
   verifier: string;
   /** Ed25519 signature of the result (base58) */
   signature: string;
-  /** Raw signature bytes for Ed25519 instruction */
-  signatureBytes?: Uint8Array;
+  /** Raw signature bytes for Ed25519 instruction (as array for JSON serialization) */
+  signatureBytes?: number[];
   /** Hash of the attestation data for on-chain storage (hex) */
   attestationHash: string;
-  /** Raw attestation hash bytes */
-  attestationHashBytes?: Uint8Array;
-  /** The message bytes that were signed (for Ed25519 instruction) */
-  messageBytes?: Uint8Array;
+  /** Raw attestation hash bytes (as array for JSON serialization) */
+  attestationHashBytes?: number[];
+  /** The message bytes that were signed (for Ed25519 instruction, as array for JSON serialization) */
+  messageBytes?: number[];
 }
 
 /**

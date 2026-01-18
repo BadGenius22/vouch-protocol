@@ -182,6 +182,35 @@ function computeNullifier(walletBytes: Uint8Array, domainSeparator: string): Uin
 }
 
 /**
+ * Compute the nullifier hash for a wallet address
+ *
+ * This is used to check if a wallet has already proven for a specific proof type.
+ *
+ * @param walletAddress - Base58 wallet address
+ * @param proofType - Type of proof ('developer' or 'whale')
+ * @returns Nullifier hash as hex string (64 characters)
+ */
+export function computeNullifierForWallet(walletAddress: string, proofType: 'developer' | 'whale'): string {
+  // Convert wallet address to bytes (use first 32 bytes of base58 decoded)
+  const bs58 = require('bs58');
+  const walletBytes = new Uint8Array(bs58.decode(walletAddress));
+
+  if (walletBytes.length !== 32) {
+    throw new VouchError('Invalid wallet address', VouchErrorCode.PROOF_GENERATION_FAILED);
+  }
+
+  // Use appropriate domain separator
+  const domainSeparator = proofType === 'developer'
+    ? CIRCUIT_CONSTANTS.DOMAIN_SEPARATOR_DEV
+    : CIRCUIT_CONSTANTS.DOMAIN_SEPARATOR_WHALE;
+
+  const nullifierBytes = computeNullifier(walletBytes, domainSeparator);
+
+  // Convert to hex string
+  return Buffer.from(nullifierBytes).toString('hex');
+}
+
+/**
  * Sanitize and validate an amount value for circuit input
  *
  * @param amount - The amount to sanitize
@@ -492,8 +521,33 @@ export async function generateDevReputationProof(
     // Step 4: Execute circuit to generate witness
     updateProgress('generating', 50, 'Executing circuit to generate witness...');
     debugLog('Executing circuit with inputs...');
-    const { witness } = await noir.execute(circuitInputs);
-    debugLog('Circuit execution complete, witness generated');
+    debugLog('Circuit inputs:', {
+      wallet_pubkey_len: (circuitInputs.wallet_pubkey as number[]).length,
+      secret_len: (circuitInputs.secret as number[]).length,
+      program_count: circuitInputs.program_count,
+      tvl_amounts_len: (circuitInputs.tvl_amounts as string[]).length,
+      min_tvl: circuitInputs.min_tvl,
+      commitment_len: (circuitInputs.commitment as number[]).length,
+      nullifier_len: (circuitInputs.nullifier as number[]).length,
+    });
+    let witness;
+    try {
+      const result = await noir.execute(circuitInputs);
+      witness = result.witness;
+      debugLog('Circuit execution complete, witness generated');
+    } catch (executeError) {
+      console.error('[Vouch] Circuit execution failed:', executeError);
+      if (executeError instanceof Error) {
+        console.error('[Vouch] Error name:', executeError.name);
+        console.error('[Vouch] Error message:', executeError.message);
+        console.error('[Vouch] Error stack:', executeError.stack);
+      }
+      throw new VouchError(
+        `Circuit execution failed: ${executeError instanceof Error ? executeError.message : 'Unknown error'}`,
+        VouchErrorCode.PROOF_GENERATION_FAILED,
+        executeError
+      );
+    }
 
     // Step 5: Generate proof from witness
     updateProgress('generating', 70, 'Generating ZK proof (this may take a moment)...');
@@ -644,11 +698,50 @@ export async function generateWhaleTradingProof(
 
     // Step 4: Execute circuit to generate witness
     updateProgress('generating', 50, 'Executing circuit to generate witness...');
-    const { witness } = await noir.execute(circuitInputs);
+    debugLog('Whale circuit inputs:', {
+      wallet_pubkey_len: (circuitInputs.wallet_pubkey as number[]).length,
+      secret_len: (circuitInputs.secret as number[]).length,
+      trade_count: circuitInputs.trade_count,
+      trade_amounts_len: (circuitInputs.trade_amounts as string[]).length,
+      min_volume: circuitInputs.min_volume,
+      commitment_len: (circuitInputs.commitment as number[]).length,
+      nullifier_len: (circuitInputs.nullifier as number[]).length,
+    });
+    let witness;
+    try {
+      const result = await noir.execute(circuitInputs);
+      witness = result.witness;
+      debugLog('Whale circuit execution complete, witness generated');
+    } catch (executeError) {
+      console.error('[Vouch] Whale circuit execution failed:', executeError);
+      if (executeError instanceof Error) {
+        console.error('[Vouch] Error name:', executeError.name);
+        console.error('[Vouch] Error message:', executeError.message);
+        console.error('[Vouch] Error stack:', executeError.stack);
+      }
+      throw new VouchError(
+        `Circuit execution failed: ${executeError instanceof Error ? executeError.message : 'Unknown error'}`,
+        VouchErrorCode.PROOF_GENERATION_FAILED,
+        executeError
+      );
+    }
 
     // Step 5: Generate proof from witness
     updateProgress('generating', 70, 'Generating ZK proof (this may take a moment)...');
-    const proofData = await backend.generateProof(witness);
+    debugLog('Starting whale backend.generateProof...');
+    let proofData;
+    try {
+      proofData = await backend.generateProof(witness);
+      debugLog('Whale proof generation completed successfully');
+    } catch (proofError) {
+      console.error('[Vouch] Whale backend proof generation failed:', proofError);
+      if (proofError instanceof Error) {
+        console.error('[Vouch] Error name:', proofError.name);
+        console.error('[Vouch] Error message:', proofError.message);
+        console.error('[Vouch] Error stack:', proofError.stack);
+      }
+      throw proofError;
+    }
 
     // Step 6: Validate proof size
     validateProofSize(proofData.proof);
@@ -678,7 +771,7 @@ export async function generateWhaleTradingProof(
       throw error;
     }
 
-    if (DEBUG) console.error('[Vouch] Proof generation error:', error);
+    if (DEBUG) console.error('[Vouch] Whale proof generation error:', error);
     updateProgress('error', 0, 'Proof generation failed', errorMessage);
 
     throw new VouchError(

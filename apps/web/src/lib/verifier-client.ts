@@ -13,6 +13,7 @@
 
 import type { Connection, Transaction } from '@solana/web3.js';
 import { PublicKey, SystemProgram, TransactionInstruction, Ed25519Program, SYSVAR_INSTRUCTIONS_PUBKEY } from '@solana/web3.js';
+import bs58 from 'bs58';
 import type { ProofResult, ProofType, VerificationResult } from './types';
 import { VouchError, VouchErrorCode } from './types';
 import {
@@ -20,6 +21,7 @@ import {
   deriveNullifierPDA,
   deriveRateLimitPDA,
   buildComputeBudgetInstructions,
+  buildInitRateLimitInstruction,
 } from './verify';
 import { buildAttestationMessage, getProofTypeValue } from './verifier/sign';
 
@@ -35,10 +37,11 @@ interface VerifierAttestation {
   };
   verifier: string;
   signature: string;
-  signatureBytes?: Uint8Array;
+  // These can be arrays (from JSON serialization) or Uint8Array
+  signatureBytes?: number[] | Uint8Array;
   attestationHash: string;
-  attestationHashBytes?: Uint8Array;
-  messageBytes?: Uint8Array;
+  attestationHashBytes?: number[] | Uint8Array;
+  messageBytes?: number[] | Uint8Array;
 }
 
 interface VerifyResponse {
@@ -154,9 +157,20 @@ export async function verifyProofWithService(
 
     const data: VerifyResponse = await response.json();
 
+    console.log('[Vouch] API Response:', JSON.stringify(data, null, 2));
+
     if (!data.success || !data.attestation) {
       throw new VouchError(
         data.error || 'Verification failed',
+        VouchErrorCode.PROOF_GENERATION_FAILED
+      );
+    }
+
+    // Validate attestation has required fields
+    if (!data.attestation.signature) {
+      console.error('[Vouch] Attestation missing signature:', data.attestation);
+      throw new VouchError(
+        'Attestation missing signature',
         VouchErrorCode.PROOF_GENERATION_FAILED
       );
     }
@@ -195,10 +209,19 @@ export function buildEd25519VerifyInstruction(
  * This submits a verified attestation to the Solana program
  *
  * NOTE: Must be preceded by an Ed25519 verify instruction in the same transaction
+ *
+ * @param attestation - The verifier attestation
+ * @param nullifierPda - The nullifier PDA
+ * @param nullifierHex - The nullifier hex string (must match what was used for PDA derivation)
+ * @param verifierPubkey - The verifier public key
+ * @param recipient - The recipient address
+ * @param payer - The payer address
+ * @param rateLimitPda - The rate limit PDA
  */
 export async function buildRecordAttestationInstruction(
   attestation: VerifierAttestation,
   nullifierPda: PublicKey,
+  nullifierHex: string,
   verifierPubkey: PublicKey,
   recipient: PublicKey,
   payer: PublicKey,
@@ -225,16 +248,27 @@ export async function buildRecordAttestationInstruction(
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const discriminator = new Uint8Array(hashBuffer).slice(0, 8);
 
-  // Build instruction data
-  const attestationHashBytes = Buffer.from(attestation.attestationHash, 'hex');
+  // Build instruction data - normalize hex strings (remove 0x prefix if present)
+  const attestationHashHexNormalized = attestation.attestationHash.startsWith('0x')
+    ? attestation.attestationHash.slice(2)
+    : attestation.attestationHash;
+  const attestationHashBytes = Buffer.from(attestationHashHexNormalized, 'hex');
+
   const proofTypeValue = attestation.result.proofType === 'developer' ? 1 : 2;
-  const nullifierBytes = Buffer.from(attestation.result.nullifier, 'hex');
+
+  // Use the nullifier passed as parameter (already normalized, same as used for PDA)
+  const nullifierBytes = Buffer.from(nullifierHex, 'hex');
 
   // Decode signature from base58
-  const bs58Module = await import('bs58');
-  const bs58Decode = bs58Module.default || bs58Module;
   const signatureDecoded = attestation.signatureBytes ||
-    bs58Decode.decode(attestation.signature);
+    bs58.decode(attestation.signature);
+
+  // Debug logging
+  console.log('[Vouch] Building record_attestation instruction:');
+  console.log('  - attestationHash length:', attestationHashBytes.length);
+  console.log('  - proofTypeValue:', proofTypeValue);
+  console.log('  - nullifier length:', nullifierBytes.length);
+  console.log('  - signature length:', signatureDecoded.length);
 
   const instructionData = Buffer.concat([
     Buffer.from(discriminator),
@@ -243,6 +277,8 @@ export async function buildRecordAttestationInstruction(
     nullifierBytes,
     Buffer.from(signatureDecoded),
   ]);
+
+  console.log('  - Total instruction data length:', instructionData.length, '(expected: 137)');
 
   // Account order must match RecordAttestation struct in lib.rs:
   // 1. config
@@ -327,34 +363,118 @@ export async function submitProofWithVerifier(
     // Add compute budget
     tx.add(...buildComputeBudgetInstructions());
 
+    // Normalize nullifier - ensure no 0x prefix for PDA derivation
+    const normalizedNullifier = proof.nullifier.startsWith('0x')
+      ? proof.nullifier.slice(2)
+      : proof.nullifier;
+
+    // Debug: compare nullifiers
+    const attestationNullifier = attestation.result.nullifier.startsWith('0x')
+      ? attestation.result.nullifier.slice(2)
+      : attestation.result.nullifier;
+    console.log('[Vouch] Nullifier from proof:', normalizedNullifier.substring(0, 16) + '...');
+    console.log('[Vouch] Nullifier from attestation:', attestationNullifier.substring(0, 16) + '...');
+    if (normalizedNullifier !== attestationNullifier) {
+      console.warn('[Vouch] WARNING: Nullifier mismatch between proof and attestation!');
+    }
+
     // Derive PDAs
-    const [nullifierPda] = deriveNullifierPDA(proof.nullifier);
+    const [nullifierPda] = deriveNullifierPDA(normalizedNullifier);
     const verifierPubkey = new PublicKey(attestation.verifier);
     const recipientPubkey = recipient || payer;
     const [rateLimitPda] = deriveRateLimitPDA(recipientPubkey.toBase58());
+
+    console.log('[Vouch] PDAs derived:');
+    console.log('  - Nullifier PDA:', nullifierPda.toBase58());
+    console.log('  - Rate Limit PDA:', rateLimitPda.toBase58());
+    console.log('  - Verifier:', verifierPubkey.toBase58());
 
     // Check if nullifier account exists
     const nullifierAccount = await connection.getAccountInfo(nullifierPda);
 
     if (!nullifierAccount) {
       // Initialize nullifier account first
+      console.log('[Vouch] Initializing nullifier account...');
       const { buildInitNullifierInstruction } = await import('./verify');
-      const nullifierBytes = Buffer.from(proof.nullifier, 'hex');
+      const nullifierBytes = Buffer.from(normalizedNullifier, 'hex');
       const initNullifierIx = await buildInitNullifierInstruction(
         nullifierBytes,
         nullifierPda,
         payer
       );
       tx.add(initNullifierIx);
+    } else {
+      console.log('[Vouch] Nullifier account already exists');
+    }
+
+    // Check if rate limit account exists
+    const rateLimitAccount = await connection.getAccountInfo(rateLimitPda);
+
+    if (!rateLimitAccount) {
+      // Initialize rate limit account
+      console.log('[Vouch] Initializing rate limit account...');
+      const initRateLimitIx = await buildInitRateLimitInstruction(
+        recipientPubkey,
+        rateLimitPda,
+        payer
+      );
+      tx.add(initRateLimitIx);
     }
 
     // Get or reconstruct the message bytes and signature bytes
-    const bs58Module = await import('bs58');
-    const bs58Decode = bs58Module.default || bs58Module;
-    const messageBytes = attestation.messageBytes ||
-      reconstructMessageBytes(attestation);
-    const signatureBytes = attestation.signatureBytes ||
-      bs58Decode.decode(attestation.signature);
+    // Handle both array (from JSON) and Uint8Array formats
+    let messageBytes: Uint8Array;
+    if (attestation.messageBytes && Array.isArray(attestation.messageBytes)) {
+      messageBytes = new Uint8Array(attestation.messageBytes);
+      console.log('[Vouch] Using messageBytes from attestation (array), length:', messageBytes.length);
+    } else if (attestation.messageBytes instanceof Uint8Array) {
+      messageBytes = attestation.messageBytes;
+      console.log('[Vouch] Using messageBytes from attestation (Uint8Array), length:', messageBytes.length);
+    } else {
+      messageBytes = reconstructMessageBytes(attestation);
+      console.log('[Vouch] Reconstructed messageBytes, length:', messageBytes.length);
+    }
+
+    // Debug logging
+    console.log('[Vouch] Attestation signature:', attestation.signature);
+    console.log('[Vouch] Attestation signatureBytes type:',
+      Array.isArray(attestation.signatureBytes) ? 'array' : typeof attestation.signatureBytes,
+      'length:', attestation.signatureBytes?.length);
+
+    // Decode signature - handle array (from JSON), Uint8Array, and base58 string
+    let signatureBytes: Uint8Array;
+    if (attestation.signatureBytes && Array.isArray(attestation.signatureBytes) && attestation.signatureBytes.length === 64) {
+      signatureBytes = new Uint8Array(attestation.signatureBytes);
+      console.log('[Vouch] Converted signatureBytes from array');
+    } else if (attestation.signatureBytes instanceof Uint8Array && attestation.signatureBytes.length === 64) {
+      signatureBytes = attestation.signatureBytes;
+      console.log('[Vouch] Using signatureBytes as Uint8Array');
+    } else if (attestation.signature) {
+      try {
+        signatureBytes = bs58.decode(attestation.signature);
+        console.log('[Vouch] Decoded signatureBytes from base58');
+      } catch (e) {
+        console.error('[Vouch] Failed to decode signature from base58:', e);
+        throw new VouchError(
+          'Invalid signature format in attestation',
+          VouchErrorCode.TRANSACTION_FAILED
+        );
+      }
+    } else {
+      throw new VouchError(
+        'No signature found in attestation',
+        VouchErrorCode.TRANSACTION_FAILED
+      );
+    }
+
+    if (signatureBytes.length !== 64) {
+      throw new VouchError(
+        `Signature must be 64 bytes but received ${signatureBytes.length} bytes`,
+        VouchErrorCode.TRANSACTION_FAILED
+      );
+    }
+
+    console.log('[Vouch] Signature bytes length:', signatureBytes.length);
 
     // Add Ed25519 signature verification instruction FIRST
     // This is required by the on-chain program which uses instruction introspection
@@ -369,6 +489,7 @@ export async function submitProofWithVerifier(
     const recordAttestationIx = await buildRecordAttestationInstruction(
       attestation,
       nullifierPda,
+      normalizedNullifier,  // Use the same nullifier as PDA derivation
       verifierPubkey,
       recipientPubkey,
       payer,

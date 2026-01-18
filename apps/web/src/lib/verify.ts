@@ -391,6 +391,35 @@ export async function buildInitNullifierInstruction(
 }
 
 /**
+ * Build the init_rate_limit instruction
+ * Initializes a rate limit account for a wallet
+ */
+export async function buildInitRateLimitInstruction(
+  wallet: PublicKey,
+  rateLimitPda: PublicKey,
+  payer: PublicKey
+): Promise<TransactionInstruction> {
+  const programId = getVerifierProgram();
+
+  // Compute Anchor discriminator: sha256("global:init_rate_limit")[0..8]
+  const discriminator = await getDiscriminator('init_rate_limit');
+
+  // Instruction data: just discriminator (no additional args)
+  const data = Buffer.from(discriminator);
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: rateLimitPda, isSigner: false, isWritable: true },
+      { pubkey: wallet, isSigner: false, isWritable: false },
+      { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    programId,
+    data,
+  });
+}
+
+/**
  * Build the verify_dev_reputation instruction
  * Uses dynamically computed Anchor discriminator for correctness
  */
@@ -561,12 +590,43 @@ export async function submitProofToChain(
 
     // Add verification instruction based on proof type
     const proofBytes = proof.proof;
-    const publicInputsBytes = Buffer.from(
-      proof.publicInputs.map(pi => Buffer.from(pi, 'hex')).reduce(
-        (acc, buf) => Buffer.concat([acc, buf]),
-        Buffer.alloc(0)
-      )
-    );
+
+    // Convert public inputs to bytes - handle different formats from NoirJS
+    debugLog('Public inputs count:', proof.publicInputs.length);
+    if (DEBUG && proof.publicInputs.length > 0) {
+      debugLog('First public input sample:', proof.publicInputs[0], 'type:', typeof proof.publicInputs[0]);
+    }
+
+    const publicInputBuffers: Buffer[] = [];
+    for (const pi of proof.publicInputs) {
+      let buf: Buffer;
+      if (typeof pi === 'string') {
+        if (pi.startsWith('0x')) {
+          // Hex string with 0x prefix
+          buf = Buffer.from(pi.slice(2), 'hex');
+        } else if (/^[0-9a-fA-F]+$/.test(pi) && pi.length === 64) {
+          // 64-char hex string (32 bytes) without prefix
+          buf = Buffer.from(pi, 'hex');
+        } else if (/^\d+$/.test(pi)) {
+          // Decimal string - convert to 32-byte big-endian buffer
+          buf = Buffer.alloc(32);
+          let val = BigInt(pi);
+          for (let i = 31; i >= 0; i--) {
+            buf[i] = Number(val & BigInt(0xff));
+            val = val >> BigInt(8);
+          }
+        } else {
+          // Assume it's hex without prefix
+          buf = Buffer.from(pi, 'hex');
+        }
+      } else {
+        // Fallback: try to convert to string and parse as hex
+        buf = Buffer.from(String(pi), 'hex');
+      }
+      publicInputBuffers.push(buf);
+    }
+    const publicInputsBytes = Buffer.concat(publicInputBuffers);
+
     const recipientPubkey = recipient || payer;
 
     if (proofType === 'developer') {

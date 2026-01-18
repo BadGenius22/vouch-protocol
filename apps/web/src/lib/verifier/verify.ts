@@ -119,9 +119,16 @@ export async function verifyProof(
     // Convert hex proof to Uint8Array
     const proofBytes = hexToBytes(proofHex);
 
-    // Verify the proof
-    console.log(`[Verifier] Verifying ${proofType} proof (${proofBytes.length} bytes)...`);
+    // Log detailed info for debugging
+    console.log(`[Verifier] Verifying ${proofType} proof...`);
+    console.log(`[Verifier] Proof size: ${proofBytes.length} bytes`);
+    console.log(`[Verifier] Public inputs count: ${publicInputsHex.length}`);
+    if (publicInputsHex.length > 0) {
+      console.log(`[Verifier] First public input sample: ${publicInputsHex[0]?.slice(0, 20)}...`);
+      console.log(`[Verifier] Public input format: ${typeof publicInputsHex[0]}`);
+    }
 
+    // Verify the proof
     const isValid = await backend.verifyProof({
       proof: proofBytes,
       publicInputs: publicInputsHex,
@@ -138,6 +145,12 @@ export async function verifyProof(
     };
   } catch (error) {
     console.error('[Verifier] Verification error:', error);
+    // Log more details about the error
+    if (error instanceof Error) {
+      console.error('[Verifier] Error name:', error.name);
+      console.error('[Verifier] Error message:', error.message);
+      console.error('[Verifier] Error stack:', error.stack);
+    }
 
     // Return invalid result on error
     return {

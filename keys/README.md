@@ -7,6 +7,7 @@ These keypairs are **intentionally committed** for devnet testing. They allow an
 | File | Purpose | Public Key |
 |------|---------|------------|
 | `vouch_verifier-keypair.json` | Program ID (same for everyone) | `EhSkCuohWP8Sdfq6yHoKih6r2rsNoYYPZZSfpnyELuaD` |
+| `verifier-keypair.json` | Verifier service keypair | `26PHXVn171FimBEzPxguk2HtjkNMeBqRuochUtMKzwHf` |
 | `test-wallet.json` | Test wallet for deployments | `3jryndGq8VRX8noTNGjAXbCSHWNs7rZ7Va6BQdfUBeGR` |
 
 ## Security
