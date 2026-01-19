@@ -5,13 +5,13 @@
  * ```typescript
  * import { proveDevReputation, proveWhaleTrading } from '@vouch/web/lib';
  *
- * // Privacy-enhanced proof flow (Privacy Cash baked in)
+ * // Privacy-enhanced proof flow (ShadowWire on mainnet)
  * const result = await proveDevReputation(input, { wallet, connection });
  * ```
  */
 
 // === Recommended Entry Points ===
-// These functions have Privacy Cash baked in by default
+// These functions have ShadowWire privacy baked in (mainnet only)
 export {
   proveDevReputation,
   proveWhaleTrading,
@@ -35,8 +35,7 @@ export { cn } from './utils';
 // === Connection Management ===
 export * from './connection';
 
-// === Privacy SDKs (used internally by prove-flow) ===
-export * from './privacy-cash';
+// === Privacy SDK (used internally by prove-flow) ===
 export * from './shadowwire';
 
 // === Private Airdrop Registry (Tiered Rewards) ===

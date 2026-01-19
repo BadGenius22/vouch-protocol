@@ -1,6 +1,6 @@
 /**
  * Privacy SDK Utilities
- * Shared utilities for Privacy Cash and ShadowWire integrations
+ * Shared utilities for ShadowWire privacy integration
  *
  * Provides:
  * - Secure memory cleanup for cryptographic material
@@ -372,7 +372,7 @@ export async function calculateFundingAmount(
   connection: Connection,
   baseAmount: number,
   options: {
-    includePrivacyCashFees?: boolean;
+    includePrivacyFees?: boolean;
     priorityLevel?: 'low' | 'medium' | 'high';
   } = {}
 ): Promise<{
@@ -380,19 +380,19 @@ export async function calculateFundingAmount(
   estimatedFees: number;
   totalRequired: number;
 }> {
-  const { includePrivacyCashFees = true, priorityLevel = 'medium' } = options;
+  const { includePrivacyFees = true, priorityLevel = 'medium' } = options;
 
   const feeEstimate = await estimateFees(connection, { priorityLevel });
 
-  // Privacy Cash typically charges ~0.5% + fixed fee
-  const privacyCashFee = includePrivacyCashFees
+  // ShadowWire pool fees (~0.5% + fixed fee)
+  const privacyFee = includePrivacyFees
     ? baseAmount * 0.005 + 0.001 // 0.5% + 0.001 SOL
     : 0;
 
   // Add buffer for multiple transactions (deposit + withdraw)
   const txFees = feeEstimate.totalFeeSol * 3; // 3 transactions worst case
 
-  const estimatedFees = privacyCashFee + txFees;
+  const estimatedFees = privacyFee + txFees;
   const totalRequired = baseAmount + estimatedFees;
 
   return {

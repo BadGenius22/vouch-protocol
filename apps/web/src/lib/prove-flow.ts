@@ -132,8 +132,6 @@ export interface ProveFlowResult {
   errorStage?: ProveFlowStage;
   /** Cleanup function */
   cleanup: () => void | Promise<void>;
-  // Legacy compatibility
-  privacyCashUsed?: boolean;
 }
 
 // ============================================================================
@@ -382,8 +380,7 @@ async function executeProveFlow<T>(
         shieldTx,
         privacyUsed,
         privacyProvider,
-        privacyCashUsed: privacyUsed, // Legacy compat
-        verifierServiceUsed,
+                verifierServiceUsed,
         error: verification.error || 'Verification failed',
         errorStage: 'submitting',
         cleanup,
@@ -407,8 +404,7 @@ async function executeProveFlow<T>(
       transferTx,
       privacyUsed,
       privacyProvider,
-      privacyCashUsed: privacyUsed, // Legacy compat
-      verifierServiceUsed,
+            verifierServiceUsed,
       cleanup,
     };
   } catch (error) {
@@ -424,8 +420,7 @@ async function executeProveFlow<T>(
       transferTx,
       privacyUsed,
       privacyProvider,
-      privacyCashUsed: privacyUsed, // Legacy compat
-      verifierServiceUsed,
+            verifierServiceUsed,
       error: isAborted ? 'Operation cancelled or timed out' : errorMessage,
       errorStage: 'generating-proof',
       cleanup,
@@ -529,9 +524,6 @@ export interface ProveFlowCostEstimate {
   privacyProvider: PrivacyProvider;
   /** Network name */
   network: string;
-  // Legacy compatibility
-  privacyCashCost?: number;
-  willUsePrivacyCash?: boolean;
 }
 
 export async function estimateProveFlowCost(
@@ -573,9 +565,6 @@ export async function estimateProveFlowCost(
     willUsePrivacy,
     privacyProvider,
     network,
-    // Legacy compatibility
-    privacyCashCost: privacyCost,
-    willUsePrivacyCash: willUsePrivacy,
   };
 }
 
