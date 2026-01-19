@@ -2,6 +2,10 @@
   "name": "@vouch/web",
   "version": "0.1.0",
   "private": true,
+  "exports": {
+    ".": "./src/index.ts",
+    "./lib": "./src/lib/index.ts"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build --webpack",
