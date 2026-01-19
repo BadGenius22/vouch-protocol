@@ -18,7 +18,8 @@ Always use these skills when working on this repository:
 
 - **Blockchain:** Solana (Anchor 0.32.1)
 - **ZK Framework:** Noir 1.0.0-beta.18 + UltraHonk (@aztec/bb.js 3.0.2) - client-side proof generation
-- **Frontend:** Next.js 14 (App Router), Tailwind CSS, shadcn/ui
+- **Frontend:** Next.js 16 (App Router), React 19, TypeScript 5.9, Tailwind CSS 3.4
+- **Testing:** Vitest 4, Playwright, React Testing Library
 - **Data:** Helius SDK (via Server Actions)
 - **Build System:** Turborepo + pnpm
 
@@ -53,7 +54,7 @@ pnpm clean                       # Clean all build artifacts
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ apps/web/ (Next.js 14)                                      │
+│ apps/web/ (Next.js 16, React 19)                            │
 ├─────────────────────────────────────────────────────────────┤
 │ Client (Browser)              │ Server Actions              │
 │ • Wallet connection           │ • Helius data fetching      │

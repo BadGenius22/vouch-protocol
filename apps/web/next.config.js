@@ -86,16 +86,91 @@ const securityHeaders = [
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false, // Remove X-Powered-By header
+
+  // Transpile packages that need special handling
+  // Note: WASM packages (@aztec/bb.js, @noir-lang/*) are only used client-side
+  // and are dynamically imported in useEffect, so they don't need transpilation
+  transpilePackages: [],
+
   experimental: {
     serverActions: {
       bodySizeLimit: '10mb',
     },
-    // Externalize packages that use WASM/Workers (don't bundle in serverless)
-    serverComponentsExternalPackages: [
-      '@aztec/bb.js',
-      '@noir-lang/noir_js',
-      '@noir-lang/types',
-    ],
+  },
+
+  // Turbopack config (used for dev)
+  turbopack: {
+    resolveAlias: {
+      // Provide empty stubs for Node.js modules used by packages like @radr/shadowwire
+      fs: { browser: './src/lib/empty-module.js' },
+      path: { browser: './src/lib/empty-module.js' },
+      net: { browser: './src/lib/empty-module.js' },
+      tls: { browser: './src/lib/empty-module.js' },
+      crypto: { browser: './src/lib/empty-module.js' },
+    },
+  },
+
+  // Webpack config (used for production builds with --webpack flag)
+  // Required for WASM packages that don't support Turbopack yet
+  webpack: (config, { isServer, webpack }) => {
+    const path = require('path');
+    const fs = require('fs');
+
+    // Handle WASM files for Noir/Barretenberg
+    config.experiments = {
+      ...config.experiments,
+      asyncWebAssembly: true,
+      layers: true,
+    };
+
+    // For pnpm: keep symlinks enabled but add explicit module paths
+    config.resolve.symlinks = true;
+
+    // Add root node_modules to resolve paths for pnpm hoisted packages
+    const appNodeModules = path.resolve(__dirname, 'node_modules');
+    const rootNodeModules = path.resolve(__dirname, '../../node_modules');
+
+    config.resolve.modules = [
+      appNodeModules,
+      rootNodeModules,
+      ...(config.resolve.modules || []),
+    ];
+
+    // Resolve symlinks to actual paths for WASM packages
+    const resolveSymlink = (symlink) => {
+      try {
+        return fs.realpathSync(symlink);
+      } catch {
+        return symlink;
+      }
+    };
+
+    // Point to actual entry files for WASM packages
+    const bbJsDir = resolveSymlink(path.join(appNodeModules, '@aztec/bb.js'));
+    const noirJsDir = resolveSymlink(path.join(appNodeModules, '@noir-lang/noir_js'));
+    const noirTypesDir = resolveSymlink(path.join(appNodeModules, '@noir-lang/types'));
+
+    // Use alias instead of replacement - point to the entry file
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      '@aztec/bb.js': path.join(bbJsDir, 'dest/browser/index.js'),
+      '@noir-lang/noir_js': path.join(noirJsDir, 'lib/index.mjs'),
+      '@noir-lang/types': path.join(noirTypesDir, 'lib/esm/types.js'),
+    };
+
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        net: false,
+        tls: false,
+        path: false,
+        crypto: false,
+        'pino-pretty': false,
+      };
+    }
+
+    return config;
   },
 
   // Security headers
@@ -137,28 +212,6 @@ const nextConfig = {
     ];
   },
 
-  webpack: (config, { isServer }) => {
-    // Handle WASM files for Noir/Barretenberg
-    config.experiments = {
-      ...config.experiments,
-      asyncWebAssembly: true,
-      layers: true,
-    };
-
-    if (!isServer) {
-      config.resolve.fallback = {
-        ...config.resolve.fallback,
-        fs: false,
-        net: false,
-        tls: false,
-        path: false,
-        crypto: false,
-        'pino-pretty': false,
-      };
-    }
-
-    return config;
-  },
 };
 
 module.exports = nextConfig;

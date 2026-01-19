@@ -95,8 +95,22 @@ export function ShadowWirePanel({ className }: ShadowWirePanelProps) {
   }, [wallet.publicKey, selectedToken, isInitialized]);
 
   useEffect(() => {
-    fetchBalance();
-  }, [fetchBalance]);
+    let cancelled = false;
+    const doFetch = async () => {
+      if (!wallet.publicKey || !isInitialized) return;
+      try {
+        const result = await getShadowBalance(wallet.publicKey.toBase58(), selectedToken);
+        if (!cancelled) {
+          setBalance(result.available);
+          setPoolAddress(result.poolAddress);
+        }
+      } catch (err) {
+        console.error('Failed to fetch balance:', err);
+      }
+    };
+    doFetch();
+    return () => { cancelled = true; };
+  }, [wallet.publicKey, selectedToken, isInitialized]);
 
   // Handle deposit
   const handleDeposit = async () => {

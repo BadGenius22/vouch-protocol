@@ -248,7 +248,7 @@ export function ErrorFallback({
   resetError,
   title = 'Something went wrong',
   description = 'An error occurred while loading this component.',
-}: ErrorFallbackProps): JSX.Element {
+}: ErrorFallbackProps): React.ReactElement {
   return (
     <Card className="border-red-200 bg-red-50">
       <CardHeader>

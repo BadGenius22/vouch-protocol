@@ -104,12 +104,12 @@ function validateHeaders(headers: Headers): boolean {
   return true;
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname, searchParams } = request.nextUrl;
   const clientIP = getClientIP(request);
   const isApiRoute = pathname.startsWith('/api');
 
-  // Skip middleware for static files
+  // Skip proxy for static files
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/circuits') ||
@@ -157,7 +157,7 @@ export function middleware(request: NextRequest) {
   return response;
 }
 
-// Configure which routes use this middleware
+// Configure which routes use this proxy
 export const config = {
   matcher: [
     /*

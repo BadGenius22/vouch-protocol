@@ -1,13 +1,21 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 
 // Dynamic import for Three.js scene (no SSR)
 const HeroScene = dynamic(() => import('./hero-scene').then((mod) => mod.HeroScene), {
   ssr: false,
   loading: () => <HeroFallback />,
 });
+
+// Pre-generated particle positions for deterministic rendering
+const PARTICLE_POSITIONS = Array.from({ length: 20 }, (_, i) => ({
+  left: ((i * 37 + 13) % 100),
+  top: ((i * 53 + 7) % 100),
+  delay: (i * 0.25) % 5,
+  duration: 4 + (i % 4),
+}));
 
 // Fallback for loading and low-end devices - CSS-only animated background
 function HeroFallback() {
@@ -37,15 +45,15 @@ function HeroFallback() {
       />
 
       {/* Floating particles (CSS) */}
-      {Array.from({ length: 20 }).map((_, i) => (
+      {PARTICLE_POSITIONS.map((pos, i) => (
         <div
           key={i}
           className="absolute w-1 h-1 rounded-full bg-primary/50 animate-float"
           style={{
-            left: `${Math.random() * 100}%`,
-            top: `${Math.random() * 100}%`,
-            animationDelay: `${Math.random() * 5}s`,
-            animationDuration: `${4 + Math.random() * 4}s`,
+            left: `${pos.left}%`,
+            top: `${pos.top}%`,
+            animationDelay: `${pos.delay}s`,
+            animationDuration: `${pos.duration}s`,
           }}
         />
       ))}
@@ -57,25 +65,25 @@ export function HeroCanvas() {
   const [canRender, setCanRender] = useState(false);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
 
+  // Sync React state with external browser capabilities (WebGL, reduced motion preference)
+  // This effect correctly runs once on mount to read browser state
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    // Check for reduced motion preference
     const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-    setPrefersReducedMotion(mediaQuery.matches);
 
-    // Check WebGL support
     try {
       const canvas = document.createElement('canvas');
       const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
       const hasWebGL = !!gl;
-
-      // Check if device is likely low-end (mobile with small screen)
       const isLowEnd = window.innerWidth < 768 && /Android|iPhone/i.test(navigator.userAgent);
 
+      setPrefersReducedMotion(mediaQuery.matches);
       setCanRender(hasWebGL && !mediaQuery.matches && !isLowEnd);
     } catch {
       setCanRender(false);
     }
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Always show fallback for reduced motion or no WebGL
   if (!canRender || prefersReducedMotion) {

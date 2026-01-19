@@ -20,6 +20,9 @@ export function Header() {
 
   // Close mobile menu on route change
   useEffect(() => {
+    // Close menu when pathname changes (runs after navigation completes)
+    // This is intentional - we're resetting UI state based on navigation
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMobileMenuOpen(false);
   }, [pathname]);
 
