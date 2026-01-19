@@ -33,13 +33,13 @@ Vouch Protocol enables **anonymous credential verification** on Solana using zer
 
 ### 🏗️ What You Can Build
 
-| Use Case | Description | Example |
-|----------|-------------|---------|
+| Use Case                                | Description                                                    | Example                                             |
+| --------------------------------------- | -------------------------------------------------------------- | --------------------------------------------------- |
 | 🧑‍💻 **Anonymous Developer Verification** | Prove TVL across deployed programs without doxxing your wallet | "I have $50k+ TVL" without revealing which programs |
-| 🐋 **Private Whale Gating** | Gate access by trading volume without revealing holdings | VIP access for $100k+ traders |
-| 🎁 **Sybil-Resistant Airdrops** | One claim per wallet, verified privately | Fair distribution without gaming |
-| 🗳️ **Anonymous DAO Voting** | Prove eligibility without linking votes to identity | Governance without doxxing |
-| 🔐 **Private KYC/Accreditation** | Prove accredited investor status anonymously | Compliant but private |
+| 🐋 **Private Whale Gating**             | Gate access by trading volume without revealing holdings       | VIP access for $100k+ traders                       |
+| 🎁 **Sybil-Resistant Airdrops**         | One claim per wallet, verified privately                       | Fair distribution without gaming                    |
+| 🗳️ **Anonymous DAO Voting**             | Prove eligibility without linking votes to identity            | Governance without doxxing                          |
+| 🔐 **Private KYC/Accreditation**        | Prove accredited investor status anonymously                   | Compliant but private                               |
 
 ---
 
@@ -50,6 +50,7 @@ Vouch Protocol enables **anonymous credential verification** on Solana using zer
 <td width="50%">
 
 ### 🔒 Privacy-First Architecture
+
 - **Client-side proof generation** - Private data never leaves the browser
 - **Zero-knowledge proofs** - Reveal nothing except threshold is met
 - **Nullifier pattern** - Prevents double-proving cryptographically
@@ -58,6 +59,7 @@ Vouch Protocol enables **anonymous credential verification** on Solana using zer
 <td width="50%">
 
 ### ⚡ Production Ready
+
 - **UltraHonk prover** - Fast proofs (~15-30 seconds)
 - **On-chain verification** - Solana program verifies proofs
 - **ShadowWire integration** - Optional enhanced privacy (mainnet)
@@ -68,6 +70,7 @@ Vouch Protocol enables **anonymous credential verification** on Solana using zer
 <td width="50%">
 
 ### 🛠️ Developer Experience
+
 - **TypeScript SDK** - Fully typed API
 - **React hooks** - Easy frontend integration
 - **Comprehensive docs** - Guides, examples, API reference
@@ -76,6 +79,7 @@ Vouch Protocol enables **anonymous credential verification** on Solana using zer
 <td width="50%">
 
 ### 🏛️ Battle-Tested Stack
+
 - **Noir circuits** - Audited ZK DSL from Aztec
 - **Anchor program** - Secure Solana smart contracts
 - **Barretenberg** - Production WASM prover
@@ -108,8 +112,8 @@ import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 const result = await proveDevReputation(
   {
     walletPubkey: wallet.publicKey.toBase58(),
-    programs: deployedPrograms,  // fetched via Helius
-    minTvl: 10000,               // threshold to prove
+    programs: deployedPrograms, // fetched via Helius
+    minTvl: 10000, // threshold to prove
   },
   { wallet, connection }
 );
@@ -183,12 +187,12 @@ if (result.success) {
   (Browser)           Action               (WASM)               Program
 ```
 
-| Step | Component | What Happens | Privacy |
-|------|-----------|--------------|---------|
-| **1** | Wallet Connect | User connects their Solana wallet | Wallet known only to user |
-| **2** | Data Fetch | Server fetches on-chain data via Helius API | Server sees wallet (trusted) |
-| **3** | Proof Gen | ZK proof generated in browser using NoirJS + Barretenberg | 🔐 Private data stays local |
-| **4** | Verification | Proof submitted to Solana verifier program | Only proof visible on-chain |
+| Step  | Component      | What Happens                                              | Privacy                      |
+| ----- | -------------- | --------------------------------------------------------- | ---------------------------- |
+| **1** | Wallet Connect | User connects their Solana wallet                         | Wallet known only to user    |
+| **2** | Data Fetch     | Server fetches on-chain data via Helius API               | Server sees wallet (trusted) |
+| **3** | Proof Gen      | ZK proof generated in browser using NoirJS + Barretenberg | 🔐 Private data stays local  |
+| **4** | Verification   | Proof submitted to Solana verifier program                | Only proof visible on-chain  |
 
 ### 🧮 Cryptographic Primitives
 
@@ -262,7 +266,7 @@ const result = await proveWhaleTrading(
   {
     walletPubkey: string,
     tradingData: TradingVolumeData,
-    minVolume: number,  // e.g., 100000 for $100k
+    minVolume: number, // e.g., 100000 for $100k
   },
   { wallet, connection }
 );
@@ -272,13 +276,13 @@ const result = await proveWhaleTrading(
 
 For advanced use cases requiring more control.
 
-| Function | Description |
-|----------|-------------|
-| `generateDevReputationProof()` | Generate ZK proof (low-level) |
-| `generateWhaleTradingProof()` | Generate whale proof (low-level) |
-| `submitProofToChain()` | Submit proof to Solana |
-| `isNullifierUsed()` | Check if nullifier was used |
-| `verifyProofLocally()` | Verify proof client-side |
+| Function                       | Description                      |
+| ------------------------------ | -------------------------------- |
+| `generateDevReputationProof()` | Generate ZK proof (low-level)    |
+| `generateWhaleTradingProof()`  | Generate whale proof (low-level) |
+| `submitProofToChain()`         | Submit proof to Solana           |
+| `isNullifierUsed()`            | Check if nullifier was used      |
+| `verifyProofLocally()`         | Verify proof client-side         |
 
 ### 📝 Types
 
@@ -357,10 +361,7 @@ async function verifyForDiscordRole() {
 ### Example 2: Private Airdrop Registration
 
 ```typescript
-import {
-  proveWhaleTrading,
-  buildRegisterForAirdropInstruction,
-} from '@vouch-protocol/sdk';
+import { proveWhaleTrading, buildRegisterForAirdropInstruction } from '@vouch-protocol/sdk';
 
 async function registerForAirdrop(campaignId: string) {
   // 1. Prove whale status
@@ -442,13 +443,13 @@ function VerifyButton() {
 
 ### Tech Stack
 
-| Layer | Technology | Purpose |
-|-------|------------|---------|
-| **🎨 Frontend** | Next.js 16, React 19, TypeScript 5.9 | User interface |
-| **🔐 ZK Proofs** | Noir 1.0.0-beta.18, UltraHonk | Client-side proof generation |
-| **⛓️ Blockchain** | Solana, Anchor 0.32.1 | On-chain verification |
-| **🔏 Privacy** | ShadowWire (optional) | Enhanced transaction privacy |
-| **📊 Data** | Helius SDK | On-chain data fetching |
+| Layer             | Technology                           | Purpose                      |
+| ----------------- | ------------------------------------ | ---------------------------- |
+| **🎨 Frontend**   | Next.js 16, React 19, TypeScript 5.9 | User interface               |
+| **🔐 ZK Proofs**  | Noir 1.0.0-beta.18, UltraHonk        | Client-side proof generation |
+| **⛓️ Blockchain** | Solana, Anchor 0.32.1                | On-chain verification        |
+| **🔏 Privacy**    | ShadowWire (optional)                | Enhanced transaction privacy |
+| **📊 Data**       | Helius SDK                           | On-chain data fetching       |
 
 ### Project Structure
 
@@ -527,11 +528,11 @@ fn main(
 
 ## 💰 Protocol Fees
 
-| Operation | Fee | Network | Purpose |
-|-----------|-----|---------|---------|
-| Proof Verification | 0.001 SOL | All | Nullifier account rent |
-| Privacy Shield | 0.002 SOL | Mainnet | ShadowWire pool fees |
-| Network Fees | ~0.0001 SOL | All | Solana transaction fees |
+| Operation          | Fee         | Network | Purpose                 |
+| ------------------ | ----------- | ------- | ----------------------- |
+| Proof Verification | 0.001 SOL   | All     | Nullifier account rent  |
+| Privacy Shield     | 0.002 SOL   | Mainnet | ShadowWire pool fees    |
+| Network Fees       | ~0.0001 SOL | All     | Solana transaction fees |
 
 **📊 Total estimated cost:** 0.001 - 0.004 SOL per verification
 
@@ -545,13 +546,13 @@ See [docs/PROTOCOL_FEES.md](docs/PROTOCOL_FEES.md) for detailed breakdown.
 
 ### Security Model
 
-| Aspect | Implementation | Guarantee |
-|--------|----------------|-----------|
-| **Private Data** | Never leaves browser | Client-side proof generation |
-| **Proof Soundness** | Noir + UltraHonk | Cryptographic security |
-| **Double-Proving** | Nullifier pattern | One proof per wallet per domain |
-| **Replay Protection** | On-chain nullifier tracking | Cannot reuse proofs |
-| **No Trusted Setup** | UltraHonk (transparent) | No ceremony required |
+| Aspect                | Implementation              | Guarantee                       |
+| --------------------- | --------------------------- | ------------------------------- |
+| **Private Data**      | Never leaves browser        | Client-side proof generation    |
+| **Proof Soundness**   | Noir + UltraHonk            | Cryptographic security          |
+| **Double-Proving**    | Nullifier pattern           | One proof per wallet per domain |
+| **Replay Protection** | On-chain nullifier tracking | Cannot reuse proofs             |
+| **No Trusted Setup**  | UltraHonk (transparent)     | No ceremony required            |
 
 ### Best Practices
 
@@ -582,7 +583,7 @@ See [SECURITY.md](SECURITY.md) for our security policy.
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/vouch-protocol
+git clone https://github.com/BadGenius22/vouch-protocol
 cd vouch-protocol
 
 # Install dependencies
@@ -628,9 +629,20 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 ---
 
+## 👨‍💻 Author
+
+<p align="center">
+  <strong>Dewangga Praxindo</strong><br/>
+  <a href="https://github.com/BadGenius22">@BadGenius22</a>
+</p>
+
+---
+
 ## 📜 License
 
 MIT License - see [LICENSE](LICENSE) for details.
+
+Copyright (c) 2026 Dewangga Praxindo
 
 ---
 
@@ -650,7 +662,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 </p>
 
 <p align="center">
-  <a href="https://github.com/your-org/vouch-protocol">GitHub</a> •
+  <a href="https://github.com/BadGenius22/vouch-protocol">GitHub</a> •
   <a href="docs/INTEGRATION_GUIDE.md">Docs</a> •
   <a href="https://discord.gg/vouch">Discord</a>
 </p>

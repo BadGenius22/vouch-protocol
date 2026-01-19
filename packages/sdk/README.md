@@ -123,16 +123,16 @@ try {
 
 Prove developer reputation anonymously.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `input.walletPubkey` | `string` | ✅ | Solana wallet address |
-| `input.programs` | `ProgramData[]` | ✅ | Deployed programs with TVL |
-| `input.minTvl` | `number` | ✅ | Minimum TVL threshold |
-| `options.wallet` | `WalletContextState` | ✅ | Connected wallet |
-| `options.connection` | `Connection` | ✅ | Solana connection |
-| `options.onProgress` | `(progress) => void` | ❌ | Progress callback |
-| `options.skipPrivacy` | `boolean` | ❌ | Skip ShadowWire (default: false) |
-| `options.signal` | `AbortSignal` | ❌ | Cancellation signal |
+| Parameter             | Type                 | Required | Description                      |
+| --------------------- | -------------------- | -------- | -------------------------------- |
+| `input.walletPubkey`  | `string`             | ✅       | Solana wallet address            |
+| `input.programs`      | `ProgramData[]`      | ✅       | Deployed programs with TVL       |
+| `input.minTvl`        | `number`             | ✅       | Minimum TVL threshold            |
+| `options.wallet`      | `WalletContextState` | ✅       | Connected wallet                 |
+| `options.connection`  | `Connection`         | ✅       | Solana connection                |
+| `options.onProgress`  | `(progress) => void` | ❌       | Progress callback                |
+| `options.skipPrivacy` | `boolean`            | ❌       | Skip ShadowWire (default: false) |
+| `options.signal`      | `AbortSignal`        | ❌       | Cancellation signal              |
 
 **Returns:** `Promise<ProveFlowResult>`
 
@@ -142,11 +142,11 @@ Prove developer reputation anonymously.
 
 Prove whale trading volume anonymously.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `input.walletPubkey` | `string` | ✅ | Solana wallet address |
-| `input.tradingData` | `TradingVolumeData` | ✅ | Trading history |
-| `input.minVolume` | `number` | ✅ | Minimum volume threshold |
+| Parameter            | Type                | Required | Description              |
+| -------------------- | ------------------- | -------- | ------------------------ |
+| `input.walletPubkey` | `string`            | ✅       | Solana wallet address    |
+| `input.tradingData`  | `TradingVolumeData` | ✅       | Trading history          |
+| `input.minVolume`    | `number`            | ✅       | Minimum volume threshold |
 
 **Returns:** `Promise<ProveFlowResult>`
 
@@ -256,17 +256,17 @@ const ix = buildCreateCampaignInstruction({
 
 ```typescript
 interface DevReputationInput {
-  walletPubkey: string;        // Solana address (base58)
-  programs: ProgramData[];     // Deployed programs
-  minTvl: number;              // Threshold in USD
+  walletPubkey: string; // Solana address (base58)
+  programs: ProgramData[]; // Deployed programs
+  minTvl: number; // Threshold in USD
 }
 
 interface ProgramData {
-  address: string;             // Program address
-  name?: string;               // Optional name
-  deployedAt: string;          // ISO timestamp
-  deployer: string;            // Deployer wallet
-  estimatedTVL: number;        // TVL in USD
+  address: string; // Program address
+  name?: string; // Optional name
+  deployedAt: string; // ISO timestamp
+  deployer: string; // Deployer wallet
+  estimatedTVL: number; // TVL in USD
 }
 
 interface WhaleTradingInput {
@@ -279,7 +279,7 @@ interface TradingVolumeData {
   totalVolume: number;
   tradeCount: number;
   amounts: number[];
-  period: number;              // Days
+  period: number; // Days
   wallet: string;
 }
 ```
@@ -299,17 +299,17 @@ interface ProveFlowResult {
 }
 
 interface ProofResult {
-  proof: Uint8Array;           // ZK proof bytes
-  publicInputs: string[];      // Circuit public inputs
-  nullifier: string;           // Hex-encoded nullifier
-  commitment: string;          // Hex-encoded commitment
-  generatedAt: number;         // Unix timestamp (ms)
-  expiresAt: number;           // Expiration (ms)
+  proof: Uint8Array; // ZK proof bytes
+  publicInputs: string[]; // Circuit public inputs
+  nullifier: string; // Hex-encoded nullifier
+  commitment: string; // Hex-encoded commitment
+  generatedAt: number; // Unix timestamp (ms)
+  expiresAt: number; // Expiration (ms)
 }
 
 interface VerificationResult {
   success: boolean;
-  signature?: string;          // Transaction signature
+  signature?: string; // Transaction signature
   error?: string;
   errorCode?: VouchErrorCode;
 }
@@ -330,7 +330,7 @@ type ProveFlowStage =
 interface ProveFlowProgress {
   stage: ProveFlowStage;
   message: string;
-  percentage: number;          // 0-100
+  percentage: number; // 0-100
 }
 ```
 
@@ -456,12 +456,12 @@ module.exports = {
 
 ### Browser Support
 
-| Browser | Support |
-|---------|---------|
-| Chrome 91+ | ✅ Full |
-| Firefox 90+ | ✅ Full |
-| Safari 15.2+ | ✅ Full |
-| Edge 91+ | ✅ Full |
+| Browser       | Support        |
+| ------------- | -------------- |
+| Chrome 91+    | ✅ Full        |
+| Firefox 90+   | ✅ Full        |
+| Safari 15.2+  | ✅ Full        |
+| Edge 91+      | ✅ Full        |
 | Mobile Chrome | ⚠️ May be slow |
 | Mobile Safari | ⚠️ May be slow |
 
@@ -586,19 +586,27 @@ await proveDevReputation(input, options);
 
 ## 📖 Documentation
 
-- [Full Documentation](https://github.com/your-org/vouch-protocol)
-- [Integration Guide](https://github.com/your-org/vouch-protocol/blob/main/docs/INTEGRATION_GUIDE.md)
-- [Protocol Fees](https://github.com/your-org/vouch-protocol/blob/main/docs/PROTOCOL_FEES.md)
-- [API Reference](https://github.com/your-org/vouch-protocol#-api-reference)
+- [Full Documentation](https://github.com/BadGenius22/vouch-protocol)
+- [Integration Guide](https://github.com/BadGenius22/vouch-protocol/blob/main/docs/INTEGRATION_GUIDE.md)
+- [Protocol Fees](https://github.com/BadGenius22/vouch-protocol/blob/main/docs/PROTOCOL_FEES.md)
+- [API Reference](https://github.com/BadGenius22/vouch-protocol#-api-reference)
+
+---
+
+## 👨‍💻 Author
+
+**Dewangga Praxindo** ([@BadGenius22](https://github.com/BadGenius22))
 
 ---
 
 ## 📜 License
 
-MIT License - see [LICENSE](https://github.com/your-org/vouch-protocol/blob/main/LICENSE)
+MIT License - Copyright (c) 2026 Dewangga Praxindo
+
+See [LICENSE](https://github.com/BadGenius22/vouch-protocol/blob/main/LICENSE)
 
 ---
 
 <p align="center">
-  Made with 🔐 by the Vouch Protocol team
+  Made with 🔐 by <a href="https://github.com/BadGenius22">Dewangga Praxindo</a>
 </p>

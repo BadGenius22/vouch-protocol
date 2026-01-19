@@ -41,7 +41,7 @@ git clone https://github.com/YOUR_USERNAME/vouch-protocol.git
 cd vouch-protocol
 
 # 3. Add upstream remote
-git remote add upstream https://github.com/your-org/vouch-protocol.git
+git remote add upstream https://github.com/BadGenius22/vouch-protocol.git
 
 # 4. Install dependencies
 pnpm install
@@ -754,11 +754,17 @@ Contributors are recognized in:
 
 ---
 
+## 👨‍💻 Maintainer
+
+**Dewangga Praxindo** ([@BadGenius22](https://github.com/BadGenius22))
+
+---
+
 <p align="center">
   <strong>🙏 Thank you for contributing to Vouch Protocol!</strong><br/>
   Together we're making privacy accessible on Solana
 </p>
 
 <p align="center">
-  <sub>Questions? Open a GitHub Discussion or reach out on Discord</sub>
+  <sub>Questions? Open a <a href="https://github.com/BadGenius22/vouch-protocol/discussions">GitHub Discussion</a> or contact <a href="https://github.com/BadGenius22">@BadGenius22</a></sub>
 </p>

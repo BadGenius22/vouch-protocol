@@ -1,8 +1,18 @@
 {
   "name": "@vouch-protocol/sdk",
   "version": "0.1.0",
-  "description": "Privacy infrastructure for Solana - verify credentials without revealing identity",
+  "description": "Privacy infrastructure for Solana - verify credentials without revealing identity using zero-knowledge proofs",
   "license": "MIT",
+  "author": "Dewangga Praxindo",
+  "homepage": "https://github.com/BadGenius22/vouch-protocol#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BadGenius22/vouch-protocol.git",
+    "directory": "packages/sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/BadGenius22/vouch-protocol/issues"
+  },
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
@@ -11,28 +21,50 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
+  "sideEffects": false,
   "scripts": {
-    "build": "tsup src/index.ts --format cjs,esm --dts",
-    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "build": "tsup",
+    "dev": "tsup --watch",
     "clean": "rm -rf dist",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@vouch/web": "workspace:*"
-  },
-  "devDependencies": {
-    "tsup": "^8.0.0",
-    "typescript": "^5.9.3"
+    "@coral-xyz/anchor": "^0.32.0",
+    "@aztec/bb.js": "3.0.2",
+    "@noir-lang/noir_js": "1.0.0-beta.18",
+    "@noir-lang/types": "1.0.0-beta.18",
+    "@solana/spl-token": "^0.4.14",
+    "blakejs": "^1.2.1",
+    "bs58": "^5.0.0",
+    "tweetnacl": "^1.0.3"
   },
   "peerDependencies": {
+    "@solana/wallet-adapter-base": ">=0.9.0",
     "@solana/wallet-adapter-react": ">=0.15.0",
     "@solana/web3.js": ">=1.90.0"
+  },
+  "peerDependenciesMeta": {
+    "@solana/wallet-adapter-react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@solana/wallet-adapter-base": "^0.9.27",
+    "@solana/wallet-adapter-react": "^0.15.39",
+    "@solana/web3.js": "^1.98.4",
+    "@types/node": "^20.10.0",
+    "@vouch/web": "workspace:*",
+    "tsup": "^8.0.0",
+    "typescript": "^5.9.3"
   },
   "keywords": [
     "solana",
@@ -42,16 +74,20 @@
     "noir",
     "anonymous",
     "reputation",
-    "verification"
+    "verification",
+    "zkp",
+    "barretenberg",
+    "proof",
+    "web3",
+    "blockchain",
+    "airdrop",
+    "sybil-resistance"
   ],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/your-org/vouch-protocol"
-  },
-  "bugs": {
-    "url": "https://github.com/your-org/vouch-protocol/issues"
-  },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }

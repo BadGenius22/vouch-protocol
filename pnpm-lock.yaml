@@ -271,16 +271,46 @@ importers:
 
   packages/sdk:
     dependencies:
+      '@aztec/bb.js':
+        specifier: 3.0.2
+        version: 3.0.2
+      '@coral-xyz/anchor':
+        specifier: ^0.32.0
+        version: 0.32.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
+      '@noir-lang/noir_js':
+        specifier: 1.0.0-beta.18
+        version: 1.0.0-beta.18
+      '@noir-lang/types':
+        specifier: 1.0.0-beta.18
+        version: 1.0.0-beta.18
+      '@solana/spl-token':
+        specifier: ^0.4.14
+        version: 0.4.14(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10))(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
+      blakejs:
+        specifier: ^1.2.1
+        version: 1.2.1
+      bs58:
+        specifier: ^5.0.0
+        version: 5.0.0
+      tweetnacl:
+        specifier: ^1.0.3
+        version: 1.0.3
+    devDependencies:
+      '@solana/wallet-adapter-base':
+        specifier: ^0.9.27
+        version: 0.9.27(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10))
       '@solana/wallet-adapter-react':
-        specifier: '>=0.15.0'
+        specifier: ^0.15.39
         version: 0.15.39(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10))(bs58@5.0.0)(fastestsmallesttextencoderdecoder@1.0.22)(react-native@0.83.1(@babel/core@7.28.6)(@types/react@19.2.8)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@5.0.10))(react@19.2.3)(typescript@5.9.3)
       '@solana/web3.js':
-        specifier: '>=1.90.0'
+        specifier: ^1.98.4
         version: 1.98.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
+      '@types/node':
+        specifier: ^20.10.0
+        version: 20.19.29
       '@vouch/web':
         specifier: workspace:*
         version: link:../../apps/web
-    devDependencies:
       tsup:
         specifier: ^8.0.0
         version: 8.5.1(jiti@1.21.7)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2)

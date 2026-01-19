@@ -35,10 +35,10 @@
 
 Instead, report them via:
 
-| Method | Contact | Response Time |
-|--------|---------|---------------|
-| 📧 Email | **security@vouch-protocol.com** | < 24 hours |
-| 🔐 PGP | [Public Key](#pgp-key) | < 24 hours |
+| Method   | Contact                         | Response Time |
+| -------- | ------------------------------- | ------------- |
+| 📧 Email | **security@vouch-protocol.com** | < 24 hours    |
+| 🔐 PGP   | [Public Key](#pgp-key)          | < 24 hours    |
 
 ### What to Include
 
@@ -165,12 +165,12 @@ After you submit a vulnerability report:
 
 ### Privacy Guarantees
 
-| Property | Guarantee | Technical Basis |
-|----------|-----------|-----------------|
-| **Wallet Anonymity** | Wallet address is never revealed | Commitment = Hash(wallet + secret) |
-| **Threshold Privacy** | Exact amounts not revealed | ZK proves (amount ≥ threshold) only |
-| **Unlinkability** | Different proofs can't be linked | Nullifier uses domain separation |
-| **No Server Trust** | No trusted third party | Proof generated client-side |
+| Property              | Guarantee                        | Technical Basis                     |
+| --------------------- | -------------------------------- | ----------------------------------- |
+| **Wallet Anonymity**  | Wallet address is never revealed | Commitment = Hash(wallet + secret)  |
+| **Threshold Privacy** | Exact amounts not revealed       | ZK proves (amount ≥ threshold) only |
+| **Unlinkability**     | Different proofs can't be linked | Nullifier uses domain separation    |
+| **No Server Trust**   | No trusted third party           | Proof generated client-side         |
 
 ### Trust Assumptions
 
@@ -202,10 +202,10 @@ After you submit a vulnerability report:
 
 ## 📦 Supported Versions
 
-| Version | Status | Security Updates |
-|---------|--------|------------------|
-| 0.1.x | ✅ Active | Full support |
-| < 0.1.0 | ❌ Unsupported | No updates |
+| Version | Status         | Security Updates |
+| ------- | -------------- | ---------------- |
+| 0.1.x   | ✅ Active      | Full support     |
+| < 0.1.0 | ❌ Unsupported | No updates       |
 
 **Note:** Always use the latest version for security fixes.
 
@@ -215,12 +215,12 @@ After you submit a vulnerability report:
 
 ### Cryptographic Security
 
-| Component | Algorithm | Security Level |
-|-----------|-----------|----------------|
-| Proof System | UltraHonk (Barretenberg) | 128-bit |
-| Hash Function | BLAKE2s | 256-bit output |
-| Commitment Scheme | Hash-based | Binding + Hiding |
-| Nullifier Derivation | Domain-separated hash | Collision-resistant |
+| Component            | Algorithm                | Security Level      |
+| -------------------- | ------------------------ | ------------------- |
+| Proof System         | UltraHonk (Barretenberg) | 128-bit             |
+| Hash Function        | BLAKE2s                  | 256-bit output      |
+| Commitment Scheme    | Hash-based               | Binding + Hiding    |
+| Nullifier Derivation | Domain-separated hash    | Collision-resistant |
 
 ### Code Security
 
@@ -253,12 +253,12 @@ After you submit a vulnerability report:
 
 ### Infrastructure Security
 
-| Layer | Protection |
-|-------|------------|
-| Transport | HTTPS/TLS 1.3 required |
-| Browser | COOP/COEP headers for WASM isolation |
-| Circuit Files | Subresource Integrity (SRI) hashes |
-| RPC | Rate limiting, authenticated access |
+| Layer         | Protection                           |
+| ------------- | ------------------------------------ |
+| Transport     | HTTPS/TLS 1.3 required               |
+| Browser       | COOP/COEP headers for WASM isolation |
+| Circuit Files | Subresource Integrity (SRI) hashes   |
+| RPC           | Rate limiting, authenticated access  |
 
 ---
 
@@ -266,22 +266,22 @@ After you submit a vulnerability report:
 
 ### In-Scope Threats
 
-| Threat | Mitigation | Status |
-|--------|------------|--------|
-| **Proof Forgery** | Cryptographic proof verification | ✅ Mitigated |
-| **Double Verification** | Nullifier system | ✅ Mitigated |
-| **Front-Running** | Commitment scheme | ✅ Mitigated |
-| **Wallet Deanonymization** | ZK proofs hide wallet | ✅ Mitigated |
-| **Replay Attacks** | Unique nullifiers per domain | ✅ Mitigated |
+| Threat                     | Mitigation                       | Status       |
+| -------------------------- | -------------------------------- | ------------ |
+| **Proof Forgery**          | Cryptographic proof verification | ✅ Mitigated |
+| **Double Verification**    | Nullifier system                 | ✅ Mitigated |
+| **Front-Running**          | Commitment scheme                | ✅ Mitigated |
+| **Wallet Deanonymization** | ZK proofs hide wallet            | ✅ Mitigated |
+| **Replay Attacks**         | Unique nullifiers per domain     | ✅ Mitigated |
 
 ### Out-of-Scope Threats
 
-| Threat | Reason | Recommendation |
-|--------|--------|----------------|
-| **Compromised Browser** | User environment | Use trusted device |
-| **Social Engineering** | Human factor | Security awareness |
-| **Wallet Key Theft** | External to protocol | Secure key storage |
-| **Network Timing Analysis** | Optional privacy layer | Use ShadowWire |
+| Threat                      | Reason                 | Recommendation     |
+| --------------------------- | ---------------------- | ------------------ |
+| **Compromised Browser**     | User environment       | Use trusted device |
+| **Social Engineering**      | Human factor           | Security awareness |
+| **Wallet Key Theft**        | External to protocol   | Secure key storage |
+| **Network Timing Analysis** | Optional privacy layer | Use ShadowWire     |
 
 ### Known Limitations
 
@@ -323,17 +323,17 @@ After you submit a vulnerability report:
 
 ### Completed Audits
 
-| Date | Auditor | Scope | Findings | Report |
-|------|---------|-------|----------|--------|
-| TBD | Pending | Full protocol | - | - |
+| Date | Auditor | Scope         | Findings | Report |
+| ---- | ------- | ------------- | -------- | ------ |
+| TBD  | Pending | Full protocol | -        | -      |
 
 ### Planned Audits
 
-| Timeline | Auditor | Scope |
-|----------|---------|-------|
-| Q1 2025 | TBD | Noir circuits |
-| Q2 2025 | TBD | Anchor program |
-| Q3 2025 | TBD | Full protocol |
+| Timeline | Auditor | Scope          |
+| -------- | ------- | -------------- |
+| Q1 2026  | TBD     | Noir circuits  |
+| Q2 2026  | TBD     | Anchor program |
+| Q3 2026  | TBD     | Full protocol  |
 
 **Note:** We are actively seeking audit partners. Contact us if interested.
 
@@ -347,22 +347,24 @@ We are launching a bug bounty program. Details will be announced soon.
 
 ### Preliminary Reward Structure
 
-| Severity | Description | Reward Range |
-|----------|-------------|--------------|
+| Severity        | Description                     | Reward Range     |
+| --------------- | ------------------------------- | ---------------- |
 | 🔴 **Critical** | Direct fund loss, proof forgery | $5,000 - $25,000 |
-| 🟠 **High** | Privacy breach, DoS on mainnet | $1,000 - $5,000 |
-| 🟡 **Medium** | Limited impact vulnerabilities | $250 - $1,000 |
-| 🟢 **Low** | Minor issues, best practices | $50 - $250 |
+| 🟠 **High**     | Privacy breach, DoS on mainnet  | $1,000 - $5,000  |
+| 🟡 **Medium**   | Limited impact vulnerabilities  | $250 - $1,000    |
+| 🟢 **Low**      | Minor issues, best practices    | $50 - $250       |
 
 ### Scope
 
 **In Scope:**
+
 - Noir circuits (`circuits/`)
 - Anchor program (`programs/vouch-verifier/`)
 - SDK (`packages/sdk/`)
 - Web application (`apps/web/src/lib/`)
 
 **Out of Scope:**
+
 - Third-party dependencies (report to maintainers)
 - Social engineering
 - Phishing
@@ -446,12 +448,17 @@ We are launching a bug bounty program. Details will be announced soon.
 
 ## 📞 Contact
 
+### Author
+
+**Dewangga Praxindo** ([@BadGenius22](https://github.com/BadGenius22))
+
 ### Security Team
 
-| Contact | Method | Response Time |
-|---------|--------|---------------|
-| Security Reports | security@vouch-protocol.com | < 24 hours |
-| General Security Questions | GitHub Discussions | < 72 hours |
+| Contact                    | Method                                                                | Response Time |
+| -------------------------- | --------------------------------------------------------------------- | ------------- |
+| Security Reports           | [GitHub Issues](https://github.com/BadGenius22/vouch-protocol/issues) | < 24 hours    |
+| General Security Questions | GitHub Discussions                                                    | < 72 hours    |
+| Author Direct              | [@BadGenius22](https://github.com/BadGenius22)                        | < 48 hours    |
 
 ### PGP Key
 
@@ -470,10 +477,10 @@ We are launching a bug bounty program. Details will be announced soon.
 We thank the following security researchers for their responsible disclosure:
 
 | Researcher | Vulnerability | Date | Severity |
-|------------|---------------|------|----------|
-| *None yet* | - | - | - |
+| ---------- | ------------- | ---- | -------- |
+| _None yet_ | -             | -    | -        |
 
-*Your name could be here! Report vulnerabilities responsibly.*
+_Your name could be here! Report vulnerabilities responsibly._
 
 ---
 
@@ -483,5 +490,5 @@ We thank the following security researchers for their responsible disclosure:
 </p>
 
 <p align="center">
-  <sub>Last updated: January 2025</sub>
+  <sub>Last updated: January 2026</sub>
 </p>
