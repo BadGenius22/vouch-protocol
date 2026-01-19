@@ -5,51 +5,115 @@ import { useUnifiedWallet } from '@jup-ag/wallet-adapter';
 import { useWalletReady, useSolanaConnection } from '@/components/providers';
 import { GlowCard } from '@/components/ui/glow-card';
 import { GlowButton } from '@/components/ui/glow-button';
-import { StepIndicator } from '@/components/ui/step-indicator';
 import { WalletButton } from '@/components/wallet/wallet-button';
-import { AirdropRegistration } from '@/components/airdrop/AirdropRegistration';
 import { AirdropClaim } from '@/components/airdrop/AirdropClaim';
 import { type AirdropCampaign } from '@/lib/airdrop-registry';
-import { Loader2, BadgeCheck, Code2, TrendingUp } from 'lucide-react';
+import {
+  Loader2,
+  BadgeCheck,
+  Code2,
+  TrendingUp,
+  CheckCircle2,
+  Wallet,
+  Gift,
+  Shield,
+  ExternalLink,
+} from 'lucide-react';
+import { Transaction } from '@solana/web3.js';
+import {
+  buildRegisterForAirdropInstruction,
+  buildRegisterForAirdropOpenInstruction,
+  isRegisteredForCampaign,
+  isOpenRegisteredForCampaign,
+  calculateAirdropAmount,
+  getCampaignPDA,
+} from '@/lib/airdrop-registry';
 
-type PageState = 'browse' | 'register' | 'claim';
+// Real campaign on devnet - VOUCH token airdrop (V2 - updated program)
+const CAMPAIGN: AirdropCampaign = {
+  campaignId: '7fac1fcd64e4e9360dcb92830768add1493732e1ef52506643e4690cd3cab68d',
+  creator: '3LQdxe988qYTwSS3dUo4uigYdoZEGNMNPGhLEizKXGrK',
+  name: 'Vouch Devnet Airdrop V2',
+  tokenMint: 'GRL7X2VtBZnKUmrag6zXjFUno8q8HCMssTA3W8oiP8mx', // VOUCH token
+  baseAmount: 100_000_000_000, // 100 VOUCH base for everyone
+  devBonus: 50_000_000_000, // +50 VOUCH for devs (total 150 VOUCH)
+  whaleBonus: 150_000_000_000, // +150 VOUCH for whales (total 250 VOUCH)
+  registrationDeadline: new Date('2026-02-18T11:31:40.000Z'),
+  status: 'open',
+  totalRegistrations: 0,
+  openRegistrations: 0,
+  devRegistrations: 0,
+  whaleRegistrations: 0,
+  createdAt: new Date(),
+};
 
-// Real campaign on devnet - VOUCH token airdrop
-// Campaign created via: scripts/create-devnet-campaign.ts
-const DEVNET_CAMPAIGNS: AirdropCampaign[] = [
-  {
-    campaignId: 'db4811899b3214b0e3191ca1500c2e8be0c487cfa477eab1b5020c655cebeb6b',
-    creator: '3LQdxe988qYTwSS3dUo4uigYdoZEGNMNPGhLEizKXGrK',
-    name: 'Vouch Devnet Airdrop',
-    tokenMint: 'GRL7X2VtBZnKUmrag6zXjFUno8q8HCMssTA3W8oiP8mx', // VOUCH token
-    baseAmount: 100_000_000_000, // 100 VOUCH base for everyone
-    devBonus: 50_000_000_000, // +50 VOUCH for devs (total 150 VOUCH)
-    whaleBonus: 150_000_000_000, // +150 VOUCH for whales (total 250 VOUCH)
-    registrationDeadline: new Date('2026-02-17T14:31:57.000Z'),
-    status: 'open',
-    totalRegistrations: 0,
-    openRegistrations: 0,
-    devRegistrations: 0,
-    whaleRegistrations: 0,
-    createdAt: new Date(),
-  },
-];
+type UserStatus = 'loading' | 'not_connected' | 'not_registered' | 'registered' | 'claimed';
 
-const STEPS = [
-  { id: 'connect', label: 'Connect Wallet' },
-  { id: 'proof', label: 'Proof (Optional)' },
-  { id: 'register', label: 'Register' },
-  { id: 'claim', label: 'Claim' },
-];
+function hexToBytes(hex: string): Uint8Array {
+  const cleanHex = hex.startsWith('0x') ? hex.slice(2) : hex;
+  const bytes = new Uint8Array(cleanHex.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(cleanHex.substr(i * 2, 2), 16);
+  }
+  return bytes;
+}
+
+// Simple 3-step indicator
+function StepIndicator({ currentStep }: { currentStep: 1 | 2 | 3 }) {
+  const steps = [
+    { num: 1, label: 'Connect', icon: Wallet },
+    { num: 2, label: 'Register', icon: Gift },
+    { num: 3, label: 'Claim', icon: Shield },
+  ];
+
+  return (
+    <div className="flex items-center justify-center gap-2 mb-8">
+      {steps.map((step, i) => {
+        const Icon = step.icon;
+        const isCompleted = step.num < currentStep;
+        const isCurrent = step.num === currentStep;
+
+        return (
+          <div key={step.num} className="flex items-center">
+            <div className="flex flex-col items-center">
+              <div
+                className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+                  isCompleted
+                    ? 'bg-green-500 text-white'
+                    : isCurrent
+                      ? 'bg-gradient-to-r from-cyan-500 to-purple-500 text-white ring-2 ring-cyan-400/50'
+                      : 'bg-slate-800 text-slate-500'
+                }`}
+              >
+                {isCompleted ? <CheckCircle2 className="w-5 h-5" /> : <Icon className="w-5 h-5" />}
+              </div>
+              <span
+                className={`text-xs mt-2 font-medium ${
+                  isCurrent ? 'text-white' : isCompleted ? 'text-green-400' : 'text-slate-500'
+                }`}
+              >
+                {step.label}
+              </span>
+            </div>
+            {i < steps.length - 1 && (
+              <div
+                className={`w-12 h-0.5 mx-2 ${isCompleted ? 'bg-green-500' : 'bg-slate-700'}`}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function AirdropPage() {
   const walletReady = useWalletReady();
 
-  // Show loading state during SSR or before wallet providers mount
   if (!walletReady) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950/20 to-slate-950">
-        <div className="container mx-auto px-4 py-8 max-w-6xl">
+        <div className="container mx-auto px-4 py-8 max-w-2xl">
           <div className="text-center py-20">
             <Loader2 className="w-8 h-8 text-purple-500 animate-spin mx-auto mb-4" />
             <p className="text-slate-400">Loading...</p>
@@ -66,11 +130,10 @@ function AirdropPageContent() {
   const wallet = useUnifiedWallet();
   const connection = useSolanaConnection();
 
-  const [pageState, setPageState] = useState<PageState>('browse');
-  const [selectedCampaign, setSelectedCampaign] = useState<AirdropCampaign | null>(null);
-  const [campaigns] = useState<AirdropCampaign[]>(DEVNET_CAMPAIGNS);
-  const [currentStep, setCurrentStep] = useState('connect');
-  const [completedSteps, setCompletedSteps] = useState<string[]>([]);
+  const [userStatus, setUserStatus] = useState<UserStatus>('loading');
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [registerError, setRegisterError] = useState<string | null>(null);
+  const [txSignature, setTxSignature] = useState<string | null>(null);
   const [nullifier, setNullifier] = useState<string | null>(null);
   const [verificationStatus, setVerificationStatus] = useState<{
     checking: boolean;
@@ -78,37 +141,16 @@ function AirdropPageContent() {
     whaleVerified: boolean;
   }>({ checking: false, devVerified: false, whaleVerified: false });
 
-  // Determine current step based on wallet and nullifier
-  // Note: Proof step is optional - users can skip to register
-  useEffect(() => {
-    const completed: string[] = [];
-    let current = 'connect';
-
-    if (wallet.publicKey) {
-      completed.push('connect');
-      // Skip proof step if user goes to register without verification
-      current = pageState === 'browse' ? 'register' : current;
-    }
-    if (nullifier) {
-      completed.push('proof');
-    }
-    if (pageState === 'register') {
-      current = 'register';
-    } else if (pageState === 'claim') {
-      completed.push('register');
-      current = 'claim';
-    }
-
-    setCompletedSteps(completed);
-    setCurrentStep(current);
-  }, [wallet.publicKey, nullifier, pageState]);
-
-  // Check for stored nullifier from proof flow
+  // Check for stored nullifier and registration tx from previous sessions
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const storedNullifier = localStorage.getItem('vouch_nullifier');
       if (storedNullifier) {
         setNullifier(storedNullifier);
+      }
+      const storedRegTx = localStorage.getItem('vouch_registration_tx');
+      if (storedRegTx) {
+        setTxSignature(storedRegTx);
       }
     }
   }, []);
@@ -127,18 +169,15 @@ function AirdropPageContent() {
         const { computeNullifierForWallet } = await import('@/lib/proof');
         const { isNullifierUsed, isProgramDeployed } = await import('@/lib/verify');
 
-        // Check if program is deployed
         const deployed = await isProgramDeployed(connection);
         if (!deployed) {
           setVerificationStatus({ checking: false, devVerified: false, whaleVerified: false });
           return;
         }
 
-        // Compute nullifiers (synchronous)
         const devNullifier = computeNullifierForWallet(wallet.publicKey.toBase58(), 'developer');
         const whaleNullifier = computeNullifierForWallet(wallet.publicKey.toBase58(), 'whale');
 
-        // Check both verifications in parallel
         const [devUsed, whaleUsed] = await Promise.all([
           isNullifierUsed(connection, devNullifier),
           isNullifierUsed(connection, whaleNullifier),
@@ -150,13 +189,13 @@ function AirdropPageContent() {
           whaleVerified: whaleUsed,
         });
 
-        // Store the appropriate nullifier if verified
-        if (devUsed && typeof window !== 'undefined') {
-          localStorage.setItem('vouch_nullifier', devNullifier);
-          setNullifier(devNullifier);
-        } else if (whaleUsed && typeof window !== 'undefined') {
+        // Store the best nullifier - whale (highest bonus) > dev
+        if (whaleUsed && typeof window !== 'undefined') {
           localStorage.setItem('vouch_nullifier', whaleNullifier);
           setNullifier(whaleNullifier);
+        } else if (devUsed && typeof window !== 'undefined') {
+          localStorage.setItem('vouch_nullifier', devNullifier);
+          setNullifier(devNullifier);
         }
       } catch (err) {
         console.error('Error checking verification status:', err);
@@ -167,343 +206,414 @@ function AirdropPageContent() {
     checkVerificationStatus();
   }, [wallet.publicKey, connection]);
 
-  const handleSelectCampaign = (campaign: AirdropCampaign) => {
-    setSelectedCampaign(campaign);
-    setPageState('register');
-  };
+  // Check registration status
+  useEffect(() => {
+    async function checkStatus() {
+      if (!wallet.publicKey) {
+        setUserStatus('not_connected');
+        return;
+      }
 
-  const handleRegistrationComplete = () => {
-    // Registration complete - ShadowWire address is now auto-set to connected wallet
-    // The AirdropRegistration component handles localStorage storage
-    setPageState('claim');
-  };
+      setUserStatus('loading');
 
-  const getStatusColor = (status: AirdropCampaign['status']) => {
-    switch (status) {
-      case 'open':
-        return 'text-green-500';
-      case 'registration_closed':
-        return 'text-yellow-500';
-      case 'completed':
-        return 'text-gray-500';
+      try {
+        const campaignIdBytes = hexToBytes(CAMPAIGN.campaignId);
+        const [campaignPDA] = getCampaignPDA(campaignIdBytes);
+        const campaignAccount = await connection.getAccountInfo(campaignPDA);
+
+        if (!campaignAccount) {
+          setUserStatus('not_registered');
+          return;
+        }
+
+        // Check if already registered
+        const isOpenRegistered = await isOpenRegisteredForCampaign(
+          connection,
+          campaignIdBytes,
+          wallet.publicKey
+        );
+
+        if (isOpenRegistered) {
+          setUserStatus('registered');
+          return;
+        }
+
+        // Check verified registration
+        if (nullifier) {
+          const nullifierBytes = hexToBytes(nullifier);
+          const isVerifiedRegistered = await isRegisteredForCampaign(
+            connection,
+            campaignIdBytes,
+            nullifierBytes
+          );
+
+          if (isVerifiedRegistered) {
+            setUserStatus('registered');
+            return;
+          }
+        }
+
+        setUserStatus('not_registered');
+      } catch (err) {
+        console.error('Error checking status:', err);
+        setUserStatus('not_registered');
+      }
+    }
+
+    checkStatus();
+  }, [wallet.publicKey, connection, nullifier]);
+
+  // Calculate reward amount
+  const bestProofType: 'whale' | 'developer' | null = verificationStatus.whaleVerified
+    ? 'whale'
+    : verificationStatus.devVerified
+      ? 'developer'
+      : null;
+
+  const useVerified = bestProofType !== null && nullifier;
+  const rewardAmount = useVerified
+    ? calculateAirdropAmount(CAMPAIGN, bestProofType) / 1e9
+    : CAMPAIGN.baseAmount / 1e9;
+
+  // Handle registration
+  const handleRegister = async () => {
+    if (!wallet.publicKey || !wallet.signTransaction) {
+      setRegisterError('Wallet not connected');
+      return;
+    }
+
+    setIsRegistering(true);
+    setRegisterError(null);
+
+    try {
+      const campaignIdBytes = hexToBytes(CAMPAIGN.campaignId);
+      const shadowWireAddress = wallet.publicKey.toBase58();
+
+      let instruction;
+
+      if (useVerified && nullifier) {
+        const nullifierBytes = hexToBytes(nullifier);
+        instruction = buildRegisterForAirdropInstruction(
+          wallet.publicKey,
+          campaignIdBytes,
+          nullifierBytes,
+          shadowWireAddress
+        );
+      } else {
+        instruction = buildRegisterForAirdropOpenInstruction(
+          wallet.publicKey,
+          campaignIdBytes,
+          shadowWireAddress
+        );
+      }
+
+      const transaction = new Transaction().add(instruction);
+      transaction.feePayer = wallet.publicKey;
+      transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+
+      const signedTx = await wallet.signTransaction(transaction);
+      const signature = await connection.sendRawTransaction(signedTx.serialize());
+      await connection.confirmTransaction(signature, 'confirmed');
+
+      setTxSignature(signature);
+      setUserStatus('registered');
+
+      if (typeof window !== 'undefined') {
+        const regType = bestProofType || 'open';
+        localStorage.setItem('vouch_registration_type', regType);
+        localStorage.setItem('vouch_registration_tx', signature);
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Registration failed';
+      if (errorMsg.includes('already in use') || errorMsg.includes('already been processed')) {
+        setUserStatus('registered');
+      } else {
+        setRegisterError(errorMsg);
+      }
+    } finally {
+      setIsRegistering(false);
     }
   };
 
-  const getStatusLabel = (status: AirdropCampaign['status']) => {
-    switch (status) {
-      case 'open':
-        return 'Open for Registration';
-      case 'registration_closed':
-        return 'Registration Closed';
-      case 'completed':
-        return 'Completed';
-    }
-  };
+  // Determine current step
+  const currentStep: 1 | 2 | 3 =
+    userStatus === 'not_connected'
+      ? 1
+      : userStatus === 'not_registered'
+        ? 2
+        : 3;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950/20 to-slate-950">
-      <div className="container mx-auto px-4 py-8 max-w-6xl">
+      <div className="container mx-auto px-4 py-8 max-w-2xl">
         {/* Header */}
-        <div className="mb-8 text-center">
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-400 via-pink-500 to-purple-600 bg-clip-text text-transparent mb-2">
-            Private Airdrops
+        <div className="mb-6 text-center">
+          <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-400 via-pink-500 to-purple-600 bg-clip-text text-transparent mb-2">
+            VOUCH Airdrop
           </h1>
-          <p className="text-slate-400 text-lg">
-            Register and claim airdrops privately via ShadowWire
+          <p className="text-slate-400">
+            Claim tokens privately to any wallet
           </p>
         </div>
 
         {/* Step Indicator */}
-        <div className="mb-8">
-          <StepIndicator steps={STEPS} currentStep={currentStep} completedSteps={completedSteps} />
+        <StepIndicator currentStep={currentStep} />
+
+        {/* Devnet Badge */}
+        <div className="rounded-lg bg-cyan-500/10 border border-cyan-500/30 p-3 flex items-center gap-3 mb-6">
+          <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-xs font-bold rounded">
+            DEVNET
+          </span>
+          <p className="text-sm text-cyan-300">
+            Live on Solana Devnet - Transactions are recorded on-chain
+          </p>
         </div>
 
-        {/* Navigation Tabs */}
-        <div className="flex justify-center gap-4 mb-8">
-          <GlowButton
-            variant={pageState === 'browse' ? 'default' : 'outline'}
-            onClick={() => {
-              setPageState('browse');
-              setSelectedCampaign(null);
-            }}
-          >
-            Browse Campaigns
-          </GlowButton>
-          <GlowButton
-            variant={pageState === 'claim' ? 'default' : 'outline'}
-            onClick={() => setPageState('claim')}
-          >
-            Claim Airdrop
-          </GlowButton>
-        </div>
+        {/* Main Content Card */}
+        <GlowCard className="p-6">
+          {/* Loading */}
+          {userStatus === 'loading' && (
+            <div className="text-center py-8">
+              <Loader2 className="w-8 h-8 text-purple-500 animate-spin mx-auto mb-4" />
+              <p className="text-slate-400">Checking your status...</p>
+            </div>
+          )}
 
-        {/* Wallet Connection */}
-        {!wallet.publicKey && (
-          <GlowCard className="max-w-md mx-auto mb-8">
-            <div className="p-6 text-center">
-              <h2 className="text-xl font-semibold text-white mb-4">Connect Your Wallet</h2>
+          {/* Step 1: Connect Wallet */}
+          {userStatus === 'not_connected' && (
+            <div className="text-center py-6">
+              <Wallet className="w-12 h-12 text-slate-600 mx-auto mb-4" />
+              <h2 className="text-xl font-semibold text-white mb-2">Connect Your Wallet</h2>
               <p className="text-slate-400 mb-6">
-                Connect your Solana wallet to browse campaigns and register for airdrops.
+                Connect to check eligibility and register for the airdrop
               </p>
               <div className="flex justify-center">
                 <WalletButton />
               </div>
             </div>
-          </GlowCard>
-        )}
+          )}
 
-        {/* Verification Status - Show when wallet connected and browsing */}
-        {wallet.publicKey && pageState === 'browse' && (
-          <GlowCard className="max-w-lg mx-auto mb-8 border-cyan-500/30 bg-gradient-to-r from-cyan-500/5 to-purple-500/5">
-            <div className="p-6">
+          {/* Step 2: Register */}
+          {userStatus === 'not_registered' && (
+            <div className="space-y-6">
+              {/* Verification Status */}
               {verificationStatus.checking ? (
-                <div className="text-center py-2">
-                  <Loader2 className="w-6 h-6 text-cyan-400 animate-spin mx-auto mb-2" />
-                  <p className="text-slate-400 text-sm">Checking verification status...</p>
+                <div className="flex items-center gap-3 p-4 rounded-lg bg-slate-800/50">
+                  <Loader2 className="w-5 h-5 text-cyan-400 animate-spin" />
+                  <span className="text-slate-300">Checking verification status...</span>
                 </div>
               ) : verificationStatus.devVerified || verificationStatus.whaleVerified ? (
-                <>
-                  <h3 className="text-lg font-semibold text-green-400 mb-3 flex items-center gap-2">
-                    <BadgeCheck className="w-5 h-5" />
-                    Verification Status
-                  </h3>
-                  <div className="flex gap-4 justify-center mb-3">
-                    {verificationStatus.devVerified && (
-                      <div className="flex items-center gap-2 px-4 py-2 bg-cyan-900/30 border border-cyan-500/30 rounded-lg">
-                        <Code2 className="w-4 h-4 text-cyan-400" />
-                        <span className="text-cyan-300 font-medium">Developer Verified</span>
-                      </div>
-                    )}
-                    {verificationStatus.whaleVerified && (
-                      <div className="flex items-center gap-2 px-4 py-2 bg-purple-900/30 border border-purple-500/30 rounded-lg">
-                        <TrendingUp className="w-4 h-4 text-purple-400" />
-                        <span className="text-purple-300 font-medium">Whale Verified</span>
-                      </div>
-                    )}
+                <div className="flex items-center gap-3 p-4 rounded-lg bg-green-500/10 border border-green-500/30">
+                  <BadgeCheck className="w-5 h-5 text-green-400" />
+                  <div className="flex-1">
+                    <span className="text-green-300 font-medium">Verified!</span>
+                    <div className="flex gap-2 mt-1">
+                      {verificationStatus.whaleVerified && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-500/20 text-purple-300 text-xs rounded">
+                          <TrendingUp className="w-3 h-3" /> Whale
+                        </span>
+                      )}
+                      {verificationStatus.devVerified && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-cyan-500/20 text-cyan-300 text-xs rounded">
+                          <Code2 className="w-3 h-3" /> Developer
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <p className="text-slate-400 text-sm text-center">
-                    You&apos;re eligible for bonus rewards when registering for airdrops!
-                  </p>
-                </>
+                </div>
               ) : (
-                <>
-                  <h3 className="text-lg font-semibold text-cyan-400 mb-2">
-                    🎁 Want Bonus Tokens?
-                  </h3>
-                  <p className="text-slate-400 mb-4">
-                    Anyone can register for airdrops! Complete a proof to unlock{' '}
-                    <span className="text-cyan-400 font-medium">dev bonus</span> or{' '}
-                    <span className="text-purple-400 font-medium">whale bonus</span> rewards.
+                <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700">
+                  <p className="text-slate-300 mb-3">
+                    <span className="text-yellow-400">💡</span> Want bonus tokens? Complete a proof first:
                   </p>
-                  <div className="flex gap-4 justify-center">
+                  <div className="flex gap-3">
                     <GlowButton
                       variant="outline"
+                      size="sm"
                       onClick={() => (window.location.href = '/developer')}
-                      className="border-cyan-500/50 hover:border-cyan-400"
+                      className="flex-1 border-cyan-500/50"
                     >
-                      Dev Proof (+bonus)
+                      <Code2 className="w-4 h-4 mr-1" /> Dev (+50)
                     </GlowButton>
                     <GlowButton
                       variant="outline"
+                      size="sm"
                       onClick={() => (window.location.href = '/whale')}
-                      className="border-purple-500/50 hover:border-purple-400"
+                      className="flex-1 border-purple-500/50"
                     >
-                      Whale Proof (+bonus)
+                      <TrendingUp className="w-4 h-4 mr-1" /> Whale (+150)
                     </GlowButton>
                   </div>
-                </>
+                </div>
+              )}
+
+              {/* Reward Display */}
+              <div
+                className={`rounded-lg p-4 border ${
+                  bestProofType === 'whale'
+                    ? 'bg-purple-500/10 border-purple-500/30'
+                    : bestProofType === 'developer'
+                      ? 'bg-cyan-500/10 border-cyan-500/30'
+                      : 'bg-slate-800/50 border-slate-700'
+                }`}
+              >
+                <div className="flex justify-between items-center">
+                  <div>
+                    <span className="text-sm text-slate-400">Your Reward</span>
+                    {bestProofType && (
+                      <span
+                        className={`ml-2 text-xs px-2 py-0.5 rounded ${
+                          bestProofType === 'whale'
+                            ? 'bg-purple-500/20 text-purple-300'
+                            : 'bg-cyan-500/20 text-cyan-300'
+                        }`}
+                      >
+                        {bestProofType === 'whale' ? '🐋 Whale' : '👨‍💻 Dev'} Bonus
+                      </span>
+                    )}
+                  </div>
+                  <span
+                    className={`text-2xl font-bold ${
+                      bestProofType === 'whale'
+                        ? 'text-purple-300'
+                        : bestProofType === 'developer'
+                          ? 'text-cyan-300'
+                          : 'text-white'
+                    }`}
+                  >
+                    {rewardAmount.toFixed(0)} VOUCH
+                  </span>
+                </div>
+              </div>
+
+              {/* Error */}
+              {registerError && (
+                <div className="rounded-md bg-red-500/20 p-3 text-sm text-red-300">
+                  {registerError}
+                </div>
+              )}
+
+              {/* Register Button */}
+              <GlowButton
+                onClick={handleRegister}
+                disabled={isRegistering}
+                className="w-full h-12 text-lg"
+              >
+                {isRegistering ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    Registering...
+                  </>
+                ) : (
+                  <>
+                    <Gift className="w-5 h-5 mr-2" />
+                    Register for {rewardAmount.toFixed(0)} VOUCH
+                  </>
+                )}
+              </GlowButton>
+
+              {/* Tx Link */}
+              {txSignature && (
+                <div className="space-y-2 p-3 rounded-lg bg-slate-800/50">
+                  <p className="text-xs text-slate-400 text-center">Transaction Hash:</p>
+                  <p className="font-mono text-xs text-white text-center break-all">
+                    {txSignature}
+                  </p>
+                  <div className="flex items-center justify-center gap-4">
+                    <a
+                      href={`https://solscan.io/tx/${txSignature}?cluster=devnet`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300"
+                    >
+                      Solscan <ExternalLink className="w-3 h-3" />
+                    </a>
+                    <a
+                      href={`https://explorer.solana.com/tx/${txSignature}?cluster=devnet`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-xs text-purple-400 hover:text-purple-300"
+                    >
+                      Explorer <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                </div>
               )}
             </div>
-          </GlowCard>
-        )}
+          )}
 
-        {/* Main Content */}
-        {pageState === 'browse' && (
-          <div className="space-y-6">
-            {/* Devnet Notice */}
-            <div className="rounded-lg bg-cyan-500/10 border border-cyan-500/30 p-3 flex items-center gap-3">
-              <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-xs font-bold rounded">
-                DEVNET
-              </span>
-              <p className="text-sm text-cyan-300">
-                Live on Solana Devnet! Register to receive real VOUCH tokens. Transactions are
-                recorded on-chain.
-              </p>
+          {/* Step 3: Claim */}
+          {(userStatus === 'registered' || userStatus === 'claimed') && (
+            <div>
+              {/* Registration Success Banner */}
+              <div className="p-4 rounded-lg bg-green-500/10 border border-green-500/30 mb-6">
+                <div className="flex items-center gap-3">
+                  <CheckCircle2 className="w-5 h-5 text-green-400" />
+                  <div className="flex-1">
+                    <p className="text-green-300 font-medium">Registered!</p>
+                    <p className="text-xs text-green-400/70">
+                      {bestProofType === 'whale' && '🐋 Whale tier - 250 VOUCH'}
+                      {bestProofType === 'developer' && '👨‍💻 Developer tier - 150 VOUCH'}
+                      {!bestProofType && 'Base tier - 100 VOUCH'}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 pt-3 border-t border-green-500/20">
+                  {txSignature ? (
+                    <>
+                      <p className="text-xs text-slate-400 mb-1">Registration TX:</p>
+                      <div className="flex items-center gap-2">
+                        <code className="text-xs text-slate-300 truncate flex-1">{txSignature}</code>
+                        <a
+                          href={`https://solscan.io/tx/${txSignature}?cluster=devnet`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-cyan-400 hover:text-cyan-300"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    </>
+                  ) : (
+                    <a
+                      href={`https://solscan.io/account/${wallet.publicKey?.toBase58()}?cluster=devnet`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300"
+                    >
+                      View your transactions on Solscan <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
+                </div>
+              </div>
+
+              {/* Claim Component */}
+              <AirdropClaim className="border-0 bg-transparent shadow-none p-0" />
             </div>
+          )}
+        </GlowCard>
 
-            <h2 className="text-2xl font-semibold text-white mb-4">Active Campaigns</h2>
-
-            {campaigns.length === 0 ? (
-              <GlowCard className="p-6 text-center">
-                <p className="text-slate-400">No active campaigns found.</p>
-              </GlowCard>
-            ) : (
-              <div className="grid gap-6 md:grid-cols-2">
-                {campaigns.map((campaign) => (
-                  <GlowCard key={campaign.campaignId} className="p-6 relative">
-                    {/* Devnet Badge */}
-                    <span className="absolute top-3 right-3 px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-xs font-bold rounded">
-                      DEVNET
-                    </span>
-                    <div className="flex justify-between items-start mb-4">
-                      <div>
-                        <h3 className="text-xl font-semibold text-white">{campaign.name}</h3>
-                        <p className={`text-sm ${getStatusColor(campaign.status)}`}>
-                          {getStatusLabel(campaign.status)}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="space-y-3 mb-4">
-                      {/* Tiered Rewards Display */}
-                      <div className="grid grid-cols-3 gap-2 text-center py-2">
-                        <div className="bg-slate-800/50 rounded-lg p-2">
-                          <p className="text-xs text-slate-400">Base</p>
-                          <p className="text-sm font-bold text-white">
-                            {(campaign.baseAmount / 1e9).toFixed(2)}
-                          </p>
-                        </div>
-                        <div className="bg-cyan-900/20 rounded-lg p-2 border border-cyan-500/20">
-                          <p className="text-xs text-cyan-400">Dev</p>
-                          <p className="text-sm font-bold text-cyan-300">
-                            {((campaign.baseAmount + campaign.devBonus) / 1e9).toFixed(2)}
-                          </p>
-                        </div>
-                        <div className="bg-purple-900/20 rounded-lg p-2 border border-purple-500/20">
-                          <p className="text-xs text-purple-400">Whale</p>
-                          <p className="text-sm font-bold text-purple-300">
-                            {((campaign.baseAmount + campaign.whaleBonus) / 1e9).toFixed(2)}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-slate-400">Deadline:</span>
-                        <span className="text-white">
-                          {campaign.registrationDeadline.toLocaleDateString()}
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-slate-400">Registrations:</span>
-                        <span className="text-white text-xs">
-                          {campaign.totalRegistrations} total ({campaign.openRegistrations} open,{' '}
-                          {campaign.devRegistrations} dev, {campaign.whaleRegistrations} whale)
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="pt-4 border-t border-slate-700">
-                      <GlowButton
-                        className="w-full"
-                        disabled={campaign.status !== 'open' || !wallet.publicKey}
-                        onClick={() => handleSelectCampaign(campaign)}
-                      >
-                        {!wallet.publicKey
-                          ? 'Connect Wallet'
-                          : campaign.status !== 'open'
-                            ? 'Registration Closed'
-                            : 'Register Now'}
-                      </GlowButton>
-                    </div>
-                  </GlowCard>
-                ))}
-              </div>
-            )}
-
-            {/* Privacy Explainer */}
-            <GlowCard className="p-6 mt-8">
-              <h3 className="text-lg font-semibold text-white mb-4">How Private Airdrops Work</h3>
-              <div className="grid md:grid-cols-4 gap-4">
-                <div className="text-center p-4 bg-slate-800/50 rounded-lg">
-                  <div className="text-3xl mb-2">1</div>
-                  <p className="text-sm text-slate-300">
-                    Complete a Vouch proof to verify your developer or whale status
-                  </p>
-                </div>
-                <div className="text-center p-4 bg-slate-800/50 rounded-lg">
-                  <div className="text-3xl mb-2">2</div>
-                  <p className="text-sm text-slate-300">
-                    Register for campaigns using your ShadowWire address
-                  </p>
-                </div>
-                <div className="text-center p-4 bg-slate-800/50 rounded-lg">
-                  <div className="text-3xl mb-2">3</div>
-                  <p className="text-sm text-slate-300">
-                    Projects distribute tokens privately (amounts hidden)
-                  </p>
-                </div>
-                <div className="text-center p-4 bg-slate-800/50 rounded-lg">
-                  <div className="text-3xl mb-2">4</div>
-                  <p className="text-sm text-slate-300">
-                    Claim your tokens to any wallet privately
-                  </p>
-                </div>
-              </div>
-              <p className="text-center text-green-400 mt-4 font-medium">
-                No one can see who received how much!
-              </p>
-            </GlowCard>
-          </div>
-        )}
-
-        {pageState === 'register' && selectedCampaign && (
-          <div className="max-w-xl mx-auto">
-            <button
-              onClick={() => {
-                setPageState('browse');
-                setSelectedCampaign(null);
-              }}
-              className="text-slate-400 hover:text-white mb-4 flex items-center gap-2"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M15 19l-7-7 7-7"
-                />
-              </svg>
-              Back to Campaigns
-            </button>
-
-            <AirdropRegistration
-              campaign={selectedCampaign}
-              nullifier={nullifier || undefined}
-              devVerified={verificationStatus.devVerified}
-              whaleVerified={verificationStatus.whaleVerified}
-              onRegistered={handleRegistrationComplete}
-              className="bg-slate-900/50 border-slate-700"
-            />
-          </div>
-        )}
-
-        {pageState === 'claim' && (
-          <div className="max-w-xl mx-auto">
-            <AirdropClaim className="bg-slate-900/50 border-slate-700" />
-
-            {/* Additional Info */}
-            <GlowCard className="mt-6 p-6">
-              <h3 className="text-lg font-semibold text-white mb-3">About Private Claims</h3>
-              <ul className="space-y-2 text-sm text-slate-400">
-                <li className="flex items-start gap-2">
-                  <span className="text-green-400 mt-0.5">&#10003;</span>
-                  <span>Your airdrop balance is private - only you can see it</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-green-400 mt-0.5">&#10003;</span>
-                  <span>Withdraw to any Solana wallet address</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-green-400 mt-0.5">&#10003;</span>
-                  <span>The withdrawal transaction hides the sender</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-green-400 mt-0.5">&#10003;</span>
-                  <span>No one can link your real wallet to the airdrop amount</span>
-                </li>
-              </ul>
-            </GlowCard>
-          </div>
-        )}
+        {/* Privacy Info */}
+        <GlowCard className="mt-6 p-4">
+          <h3 className="text-sm font-semibold text-white mb-2 flex items-center gap-2">
+            <Shield className="w-4 h-4 text-green-400" />
+            Privacy Protection
+          </h3>
+          <ul className="space-y-1 text-xs text-slate-400">
+            <li className="flex items-start gap-2">
+              <CheckCircle2 className="w-3 h-3 text-green-400 mt-0.5 flex-shrink-0" />
+              <span>Claim to any wallet - no one can trace it back to you</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <CheckCircle2 className="w-3 h-3 text-green-400 mt-0.5 flex-shrink-0" />
+              <span>Your trading history and on-chain activity stay private</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <CheckCircle2 className="w-3 h-3 text-green-400 mt-0.5 flex-shrink-0" />
+              <span>Zero-knowledge proofs verify eligibility without revealing identity</span>
+            </li>
+          </ul>
+        </GlowCard>
       </div>
     </div>
   );

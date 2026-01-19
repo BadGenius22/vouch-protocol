@@ -410,7 +410,7 @@ export function AirdropRegistration({
               </div>
             </div>
             <a
-              href="/airdrop/claim"
+              href="/airdrop"
               className="block w-full text-center py-3 px-4 rounded-md bg-gradient-to-r from-cyan-500 to-purple-500 text-white font-medium hover:from-cyan-600 hover:to-purple-600 transition-colors"
             >
               Go to Claim Page →
@@ -452,7 +452,7 @@ export function AirdropRegistration({
             </div>
 
             <a
-              href="/airdrop/claim"
+              href="/airdrop"
               className="block w-full text-center py-3 px-4 rounded-md bg-gradient-to-r from-cyan-500 to-purple-500 text-white font-medium hover:from-cyan-600 hover:to-purple-600 transition-colors"
             >
               Go to Claim Page →

@@ -2,6 +2,8 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::sysvar::instructions::{
     load_current_index_checked, load_instruction_at_checked,
 };
+use anchor_spl::associated_token::AssociatedToken;
+use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
 use solana_sdk_ids::ed25519_program;
 
 declare_id!("EhSkCuohWP8Sdfq6yHoKih6r2rsNoYYPZZSfpnyELuaD");
@@ -380,6 +382,8 @@ pub mod vouch_verifier {
         campaign.dev_registrations = 0;
         campaign.whale_registrations = 0;
         campaign.created_at = Clock::get()?.unix_timestamp;
+        campaign.vault_balance = 0;
+        campaign.total_claimed = 0;
         campaign.bump = ctx.bumps.campaign;
 
         emit!(AirdropCampaignCreated {
@@ -429,6 +433,9 @@ pub mod vouch_verifier {
         registration.proof_type = nullifier_account.proof_type;
         registration.registered_at = now;
         registration.is_distributed = false;
+        registration.is_claimed = false;
+        registration.claimed_at = 0;
+        registration.claimed_amount = 0;
         registration.bump = ctx.bumps.registration;
 
         // Update campaign stats
@@ -496,6 +503,9 @@ pub mod vouch_verifier {
         registration.proof_type = ProofType::Unset; // No verification
         registration.registered_at = now;
         registration.is_distributed = false;
+        registration.is_claimed = false;
+        registration.claimed_at = 0;
+        registration.claimed_amount = 0;
         registration.bump = ctx.bumps.registration;
 
         // Update campaign stats
@@ -582,6 +592,121 @@ pub mod vouch_verifier {
             campaign_id: campaign.campaign_id,
             total_distributed: campaign.total_registrations,
             timestamp: campaign.completed_at,
+        });
+
+        Ok(())
+    }
+
+    /// Fund an airdrop campaign's token vault
+    /// Only campaign creator can fund
+    /// Tokens are transferred from creator's ATA to campaign vault
+    pub fn fund_airdrop_campaign(ctx: Context<FundAirdropCampaign>, amount: u64) -> Result<()> {
+        let campaign = &ctx.accounts.campaign;
+
+        require!(amount > 0, VouchError::InvalidAmount);
+        require!(
+            campaign.status == CampaignStatus::Open ||
+            campaign.status == CampaignStatus::RegistrationClosed,
+            VouchError::CampaignNotOpen
+        );
+
+        // Transfer tokens from creator to vault
+        let cpi_accounts = Transfer {
+            from: ctx.accounts.creator_token_account.to_account_info(),
+            to: ctx.accounts.campaign_vault.to_account_info(),
+            authority: ctx.accounts.creator.to_account_info(),
+        };
+        let cpi_program = ctx.accounts.token_program.to_account_info();
+        let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+        token::transfer(cpi_ctx, amount)?;
+
+        // Update campaign funding stats
+        let campaign = &mut ctx.accounts.campaign;
+        campaign.vault_balance = campaign
+            .vault_balance
+            .checked_add(amount)
+            .ok_or(VouchError::Overflow)?;
+
+        emit!(AirdropCampaignFunded {
+            campaign_id: campaign.campaign_id,
+            funder: ctx.accounts.creator.key(),
+            amount,
+            total_funded: campaign.vault_balance,
+            timestamp: Clock::get()?.unix_timestamp,
+        });
+
+        Ok(())
+    }
+
+    /// Claim airdrop tokens from a campaign
+    /// Only registered users can claim
+    /// Tokens are transferred from campaign vault to claimer's ATA
+    pub fn claim_airdrop(ctx: Context<ClaimAirdrop>) -> Result<()> {
+        let registration = &ctx.accounts.registration;
+        let campaign = &ctx.accounts.campaign;
+
+        // Verify not already claimed
+        require!(!registration.is_claimed, VouchError::AlreadyClaimed);
+
+        // Calculate claim amount based on proof type
+        let claim_amount = match registration.proof_type {
+            ProofType::DeveloperReputation => {
+                campaign.base_amount.checked_add(campaign.dev_bonus).ok_or(VouchError::Overflow)?
+            }
+            ProofType::WhaleTrading => {
+                campaign.base_amount.checked_add(campaign.whale_bonus).ok_or(VouchError::Overflow)?
+            }
+            ProofType::Unset => campaign.base_amount, // Open registration gets base only
+        };
+
+        // Verify vault has enough tokens
+        require!(
+            ctx.accounts.campaign_vault.amount >= claim_amount,
+            VouchError::InsufficientFunds
+        );
+
+        // Transfer tokens from vault to claimer
+        let campaign_id = campaign.campaign_id;
+        let bump = campaign.bump;
+        let seeds = &[
+            b"airdrop_campaign".as_ref(),
+            campaign_id.as_ref(),
+            &[bump],
+        ];
+        let signer_seeds = &[&seeds[..]];
+
+        let cpi_accounts = Transfer {
+            from: ctx.accounts.campaign_vault.to_account_info(),
+            to: ctx.accounts.claimer_token_account.to_account_info(),
+            authority: ctx.accounts.campaign.to_account_info(),
+        };
+        let cpi_program = ctx.accounts.token_program.to_account_info();
+        let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer_seeds);
+        token::transfer(cpi_ctx, claim_amount)?;
+
+        // Update registration
+        let registration = &mut ctx.accounts.registration;
+        registration.is_claimed = true;
+        registration.claimed_at = Clock::get()?.unix_timestamp;
+        registration.claimed_amount = claim_amount;
+
+        // Update campaign stats
+        let campaign = &mut ctx.accounts.campaign;
+        campaign.vault_balance = campaign
+            .vault_balance
+            .saturating_sub(claim_amount);
+        campaign.total_claimed = campaign
+            .total_claimed
+            .checked_add(1)
+            .ok_or(VouchError::Overflow)?;
+
+        emit!(AirdropClaimed {
+            campaign_id: campaign.campaign_id,
+            claimer: ctx.accounts.claimer.key(),
+            nullifier: registration.nullifier,
+            amount: claim_amount,
+            proof_type: registration.proof_type,
+            timestamp: registration.claimed_at,
         });
 
         Ok(())
@@ -1058,6 +1183,99 @@ pub struct CompleteAirdropCampaign<'info> {
     pub creator: Signer<'info>,
 }
 
+/// Fund an airdrop campaign's token vault
+#[derive(Accounts)]
+pub struct FundAirdropCampaign<'info> {
+    #[account(
+        mut,
+        seeds = [b"airdrop_campaign", campaign.campaign_id.as_ref()],
+        bump = campaign.bump,
+        constraint = campaign.creator == creator.key() @ VouchError::Unauthorized
+    )]
+    pub campaign: Account<'info, AirdropCampaign>,
+
+    /// Campaign token vault (ATA owned by campaign PDA)
+    #[account(
+        init_if_needed,
+        payer = creator,
+        associated_token::mint = token_mint,
+        associated_token::authority = campaign,
+    )]
+    pub campaign_vault: Account<'info, TokenAccount>,
+
+    /// Token mint for the campaign
+    #[account(
+        constraint = token_mint.key() == campaign.token_mint @ VouchError::InvalidMint
+    )]
+    pub token_mint: Account<'info, Mint>,
+
+    /// Creator's token account to fund from
+    #[account(
+        mut,
+        associated_token::mint = token_mint,
+        associated_token::authority = creator,
+    )]
+    pub creator_token_account: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub creator: Signer<'info>,
+
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
+/// Claim airdrop tokens from a campaign
+#[derive(Accounts)]
+pub struct ClaimAirdrop<'info> {
+    #[account(
+        mut,
+        seeds = [b"airdrop_campaign", campaign.campaign_id.as_ref()],
+        bump = campaign.bump
+    )]
+    pub campaign: Account<'info, AirdropCampaign>,
+
+    /// Campaign token vault (ATA owned by campaign PDA)
+    #[account(
+        mut,
+        associated_token::mint = token_mint,
+        associated_token::authority = campaign,
+    )]
+    pub campaign_vault: Account<'info, TokenAccount>,
+
+    /// Token mint for the campaign
+    #[account(
+        constraint = token_mint.key() == campaign.token_mint @ VouchError::InvalidMint
+    )]
+    pub token_mint: Account<'info, Mint>,
+
+    /// Registration proving eligibility
+    #[account(
+        mut,
+        seeds = [b"airdrop_registration", campaign.key().as_ref(), registration.nullifier.as_ref()],
+        bump = registration.bump,
+        constraint = registration.campaign == campaign.key() @ VouchError::InvalidCampaign,
+        constraint = !registration.is_claimed @ VouchError::AlreadyClaimed
+    )]
+    pub registration: Account<'info, AirdropRegistrationAccount>,
+
+    /// Claimer's token account to receive tokens
+    #[account(
+        init_if_needed,
+        payer = claimer,
+        associated_token::mint = token_mint,
+        associated_token::authority = claimer,
+    )]
+    pub claimer_token_account: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub claimer: Signer<'info>,
+
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
 // === State ===
 
 #[account]
@@ -1172,6 +1390,10 @@ pub struct AirdropCampaign {
     pub created_at: i64,
     /// Campaign completion timestamp (0 if not completed)
     pub completed_at: i64,
+    /// Current vault balance (tokens available for claims)
+    pub vault_balance: u64,
+    /// Total number of claims made
+    pub total_claimed: u32,
     /// PDA bump
     pub bump: u8,
 }
@@ -1190,13 +1412,19 @@ pub struct AirdropRegistrationAccount {
     pub proof_type: ProofType,
     /// Registration timestamp
     pub registered_at: i64,
-    /// Whether tokens have been distributed
+    /// Whether tokens have been distributed (ShadowWire flow)
     pub is_distributed: bool,
     /// Distribution timestamp (0 if not distributed)
     pub distributed_at: i64,
     /// Distribution transaction signature
     #[max_len(88)]
     pub distribution_tx: String,
+    /// Whether tokens have been claimed (direct claim flow)
+    pub is_claimed: bool,
+    /// Claim timestamp (0 if not claimed)
+    pub claimed_at: i64,
+    /// Amount of tokens claimed
+    pub claimed_amount: u64,
     /// PDA bump
     pub bump: u8,
 }
@@ -1335,6 +1563,25 @@ pub struct AirdropCampaignCompleted {
     pub timestamp: i64,
 }
 
+#[event]
+pub struct AirdropCampaignFunded {
+    pub campaign_id: [u8; 32],
+    pub funder: Pubkey,
+    pub amount: u64,
+    pub total_funded: u64,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct AirdropClaimed {
+    pub campaign_id: [u8; 32],
+    pub claimer: Pubkey,
+    pub nullifier: [u8; 32],
+    pub amount: u64,
+    pub proof_type: ProofType,
+    pub timestamp: i64,
+}
+
 // === Errors ===
 
 #[error_code]
@@ -1414,4 +1661,13 @@ pub enum VouchError {
 
     #[msg("Registration does not belong to this campaign")]
     InvalidCampaign,
+
+    #[msg("Insufficient funds in campaign vault")]
+    InsufficientFunds,
+
+    #[msg("Airdrop has already been claimed")]
+    AlreadyClaimed,
+
+    #[msg("Token mint does not match campaign")]
+    InvalidMint,
 }

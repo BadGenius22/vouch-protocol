@@ -34,9 +34,9 @@ interface AirdropClaimProps {
   className?: string;
 }
 
-// Campaign info
+// Campaign info (V2 - updated program)
 const CAMPAIGN_INFO = {
-  campaignId: 'db4811899b3214b0e3191ca1500c2e8be0c487cfa477eab1b5020c655cebeb6b',
+  campaignId: '7fac1fcd64e4e9360dcb92830768add1493732e1ef52506643e4690cd3cab68d',
   tokenSymbol: 'VOUCH',
   tokenMint: 'GRL7X2VtBZnKUmrag6zXjFUno8q8HCMssTA3W8oiP8mx',
   baseAmount: 100_000_000_000,
@@ -54,6 +54,12 @@ type PageStatus =
   | 'awaiting_distribution'
   | 'ready_to_claim'
   | 'claimed';
+
+// Check if we're on devnet for testing bypass
+function isDevnet(): boolean {
+  const network = process.env.NEXT_PUBLIC_SOLANA_NETWORK || 'devnet';
+  return network !== 'mainnet-beta';
+}
 
 // Flow step indicator (same as registration)
 function FlowSteps({ currentStep }: { currentStep: 1 | 2 | 3 }) {
@@ -190,12 +196,29 @@ export function AirdropClaim({ className }: AirdropClaimProps) {
 
   const [shadowBalance, setShadowBalance] = useState<number>(0);
   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
+  const [devnetTestMode, setDevnetTestMode] = useState(false);
 
   const [destinationWallet, setDestinationWallet] = useState('');
   const [claimStatus, setClaimStatus] = useState<ClaimStatus>('idle');
   const [claimStage, setClaimStage] = useState<'generating' | 'signing' | 'submitting' | 'confirming'>('generating');
   const [claimError, setClaimError] = useState<string | null>(null);
   const [claimTxSignature, setClaimTxSignature] = useState<string | null>(null);
+
+  // Load stored claim data on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const storedClaimTx = localStorage.getItem('vouch_claim_tx');
+      const storedClaimDest = localStorage.getItem('vouch_claim_destination');
+      if (storedClaimTx) {
+        setClaimTxSignature(storedClaimTx);
+        setClaimStatus('success');
+        setPageStatus('claimed');
+      }
+      if (storedClaimDest) {
+        setDestinationWallet(storedClaimDest);
+      }
+    }
+  }, []);
 
   // Check verification status
   useEffect(() => {
@@ -318,7 +341,10 @@ export function AirdropClaim({ className }: AirdropClaimProps) {
 
         const balance = await checkShadowBalance();
 
-        if (balance > 0) {
+        // On devnet, if test mode is enabled, skip balance check
+        if (isDevnet() && devnetTestMode) {
+          setPageStatus('ready_to_claim');
+        } else if (balance > 0) {
           setPageStatus('ready_to_claim');
         } else {
           setPageStatus('awaiting_distribution');
@@ -330,7 +356,7 @@ export function AirdropClaim({ className }: AirdropClaimProps) {
     }
 
     checkStatus();
-  }, [wallet.publicKey, connection, refreshCount, verificationStatus, checkShadowBalance]);
+  }, [wallet.publicKey, connection, refreshCount, verificationStatus, checkShadowBalance, devnetTestMode]);
 
   const handleRefresh = () => setRefreshCount((c) => c + 1);
 
@@ -346,19 +372,24 @@ export function AirdropClaim({ className }: AirdropClaimProps) {
   };
 
   const handleClaim = async () => {
-    if (!destinationWallet) {
-      setClaimError('Please enter a destination wallet address');
-      return;
-    }
+    // On devnet test mode, destination is the connected wallet (on-chain claim)
+    const isTestMode = isDevnet() && devnetTestMode;
 
-    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(destinationWallet)) {
-      setClaimError('Invalid Solana wallet address');
-      return;
-    }
+    if (!isTestMode) {
+      if (!destinationWallet) {
+        setClaimError('Please enter a destination wallet address');
+        return;
+      }
 
-    if (shadowBalance <= 0) {
-      setClaimError('No balance available to withdraw');
-      return;
+      if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(destinationWallet)) {
+        setClaimError('Invalid Solana wallet address');
+        return;
+      }
+
+      if (shadowBalance <= 0) {
+        setClaimError('No balance available to withdraw');
+        return;
+      }
     }
 
     setClaimStatus('claiming');
@@ -372,19 +403,210 @@ export function AirdropClaim({ className }: AirdropClaimProps) {
 
       // Stage 2: Prepare transfer
       setClaimStage('signing');
-      const { privateTransfer } = await import('@/lib/shadowwire');
 
-      // Stage 3: Submit
-      setClaimStage('submitting');
-      const transferAmount = shadowBalance * 0.95;
-      const txSignature = await privateTransfer(
-        wallet,
-        destinationWallet,
-        transferAmount,
-        'SOL',
-        'external',
-        { timeoutMs: 60000 }
-      );
+      let txSignature: string | null = null;
+
+      if (isTestMode) {
+        // Devnet test mode: Call the on-chain claim_airdrop instruction
+        const { PublicKey, Transaction, SystemProgram } = await import('@solana/web3.js');
+        const {
+          getAssociatedTokenAddress,
+          createAssociatedTokenAccountInstruction,
+          createTransferInstruction,
+          TOKEN_PROGRAM_ID,
+          ASSOCIATED_TOKEN_PROGRAM_ID,
+        } = await import('@solana/spl-token');
+
+        if (!wallet.publicKey || !wallet.signTransaction) {
+          throw new Error('Wallet not connected');
+        }
+
+        // Validate destination wallet if provided
+        let destinationPubkey: InstanceType<typeof PublicKey> | null = null;
+        const useDestinationWallet = destinationWallet && destinationWallet !== wallet.publicKey.toBase58();
+
+        if (useDestinationWallet) {
+          try {
+            destinationPubkey = new PublicKey(destinationWallet);
+          } catch {
+            throw new Error('Invalid destination wallet address');
+          }
+        }
+
+        // Stage 3: Submit
+        setClaimStage('submitting');
+
+        const tokenMint = new PublicKey(CAMPAIGN_INFO.tokenMint);
+        const campaignIdBytes = hexToBytes(CAMPAIGN_INFO.campaignId);
+        const PROGRAM_ID = new PublicKey('EhSkCuohWP8Sdfq6yHoKih6r2rsNoYYPZZSfpnyELuaD');
+
+        // Derive campaign PDA
+        const [campaignPDA] = PublicKey.findProgramAddressSync(
+          [Buffer.from('airdrop_campaign'), Buffer.from(campaignIdBytes)],
+          PROGRAM_ID
+        );
+
+        // Get campaign vault (ATA of campaign PDA for the token mint)
+        const campaignVault = await getAssociatedTokenAddress(
+          tokenMint,
+          campaignPDA,
+          true // allowOwnerOffCurve for PDA
+        );
+
+        // Derive registration PDA
+        // For open registration, it's [b"airdrop_registration", campaign, payer]
+        // For verified registration, it's [b"airdrop_registration", campaign, nullifier]
+        let registrationPDA: InstanceType<typeof PublicKey>;
+        const storedNullifier = typeof window !== 'undefined' ? localStorage.getItem('vouch_nullifier') : null;
+
+        // First try open registration (uses wallet pubkey)
+        const [openRegPDA] = PublicKey.findProgramAddressSync(
+          [Buffer.from('airdrop_registration'), campaignPDA.toBuffer(), wallet.publicKey.toBuffer()],
+          PROGRAM_ID
+        );
+
+        const openRegAccount = await connection.getAccountInfo(openRegPDA);
+
+        if (openRegAccount) {
+          registrationPDA = openRegPDA;
+        } else if (storedNullifier) {
+          // Try verified registration with nullifier
+          const nullifierBytes = hexToBytes(storedNullifier);
+          const [verifiedRegPDA] = PublicKey.findProgramAddressSync(
+            [Buffer.from('airdrop_registration'), campaignPDA.toBuffer(), Buffer.from(nullifierBytes)],
+            PROGRAM_ID
+          );
+          const verifiedRegAccount = await connection.getAccountInfo(verifiedRegPDA);
+          if (!verifiedRegAccount) {
+            throw new Error('Registration not found. Please register for the airdrop first.');
+          }
+          registrationPDA = verifiedRegPDA;
+        } else {
+          throw new Error('Registration not found. Please register for the airdrop first.');
+        }
+
+        console.log('[AirdropClaim] Using registration PDA:', registrationPDA.toBase58());
+
+        // Get claimer's token account (will be initialized if needed by the instruction)
+        const claimerTokenAccount = await getAssociatedTokenAddress(
+          tokenMint,
+          wallet.publicKey
+        );
+
+        // Build the claim_airdrop instruction manually (discriminator + accounts)
+        // Discriminator for claim_airdrop: [137, 50, 122, 111, 89, 254, 8, 20]
+        const discriminator = Buffer.from([137, 50, 122, 111, 89, 254, 8, 20]);
+
+        const transaction = new Transaction();
+
+        // Add claim_airdrop instruction (claims to connected wallet first)
+        const claimInstruction = {
+          programId: PROGRAM_ID,
+          keys: [
+            { pubkey: campaignPDA, isSigner: false, isWritable: true },
+            { pubkey: campaignVault, isSigner: false, isWritable: true },
+            { pubkey: tokenMint, isSigner: false, isWritable: false },
+            { pubkey: registrationPDA, isSigner: false, isWritable: true },
+            { pubkey: claimerTokenAccount, isSigner: false, isWritable: true },
+            { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
+            { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+            { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+            { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+          ],
+          data: discriminator,
+        };
+
+        transaction.add(claimInstruction);
+
+        // If claiming to a different wallet, add transfer instruction
+        if (useDestinationWallet && destinationPubkey) {
+          // Get or create destination token account
+          const destinationTokenAccount = await getAssociatedTokenAddress(
+            tokenMint,
+            destinationPubkey
+          );
+
+          // Check if destination ATA exists
+          const destAtaInfo = await connection.getAccountInfo(destinationTokenAccount);
+
+          if (!destAtaInfo) {
+            // Create ATA for destination wallet
+            const createAtaIx = createAssociatedTokenAccountInstruction(
+              wallet.publicKey, // payer
+              destinationTokenAccount, // ata
+              destinationPubkey, // owner
+              tokenMint // mint
+            );
+            transaction.add(createAtaIx);
+          }
+
+          // Calculate claim amount based on registration type
+          const claimAmount = BigInt(Math.floor(rewardAmount * 1e9));
+
+          // Add transfer instruction to send tokens to destination
+          const transferIx = createTransferInstruction(
+            claimerTokenAccount, // from
+            destinationTokenAccount, // to
+            wallet.publicKey, // authority
+            claimAmount // amount in smallest units
+          );
+          transaction.add(transferIx);
+
+          console.log('[AirdropClaim] Will transfer to destination:', destinationPubkey.toBase58());
+        }
+
+        transaction.feePayer = wallet.publicKey;
+
+        // Get fresh blockhash
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+        transaction.recentBlockhash = blockhash;
+
+        console.log('[AirdropClaim] Accounts:', {
+          campaign: campaignPDA.toBase58(),
+          vault: campaignVault.toBase58(),
+          mint: tokenMint.toBase58(),
+          registration: registrationPDA.toBase58(),
+          claimerATA: claimerTokenAccount.toBase58(),
+          claimer: wallet.publicKey.toBase58(),
+          destination: useDestinationWallet ? destinationWallet : 'same as claimer',
+        });
+
+        const signedTx = await wallet.signTransaction(transaction);
+
+        // Send with preflight to get better errors
+        txSignature = await connection.sendRawTransaction(signedTx.serialize(), {
+          skipPreflight: false,
+          preflightCommitment: 'confirmed',
+        });
+
+        console.log('[AirdropClaim] Transaction sent:', txSignature);
+
+        // Wait for confirmation with timeout
+        const confirmation = await connection.confirmTransaction({
+          signature: txSignature,
+          blockhash,
+          lastValidBlockHeight,
+        }, 'confirmed');
+
+        if (confirmation.value.err) {
+          throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+        }
+      } else {
+        // Production: Use ShadowWire private transfer
+        const { privateTransfer } = await import('@/lib/shadowwire');
+
+        // Stage 3: Submit
+        setClaimStage('submitting');
+        const transferAmount = shadowBalance * 0.95;
+        txSignature = await privateTransfer(
+          wallet,
+          destinationWallet,
+          transferAmount,
+          'SOL',
+          'external',
+          { timeoutMs: 60000 }
+        );
+      }
 
       // Stage 4: Confirm
       setClaimStage('confirming');
@@ -394,11 +616,38 @@ export function AirdropClaim({ className }: AirdropClaimProps) {
         setClaimStatus('success');
         setShadowBalance(0);
         setPageStatus('claimed');
+
+        // Persist claim data to localStorage
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('vouch_claim_tx', txSignature);
+          if (destinationWallet) {
+            localStorage.setItem('vouch_claim_destination', destinationWallet);
+          }
+        }
       }
     } catch (err) {
       console.error('[AirdropClaim] Claim error:', err);
       setClaimStatus('error');
-      setClaimError(err instanceof Error ? err.message : 'Failed to withdraw');
+
+      // Parse error message for better UX
+      let errorMessage = 'Failed to withdraw';
+      if (err instanceof Error) {
+        const msg = err.message.toLowerCase();
+        if (msg.includes('already been processed')) {
+          errorMessage = 'This claim was already processed. If you didn\'t receive tokens, please refresh and try again.';
+        } else if (msg.includes('already claimed') || msg.includes('alreadyclaimed')) {
+          errorMessage = 'You have already claimed this airdrop.';
+        } else if (msg.includes('insufficient funds') || msg.includes('insufficientfunds')) {
+          errorMessage = 'Campaign vault has insufficient funds. Please contact the campaign creator.';
+        } else if (msg.includes('registration not found')) {
+          errorMessage = 'Registration not found. Please register for the airdrop first.';
+        } else if (msg.includes('0x7d3') || msg.includes('constraintseeds')) {
+          errorMessage = 'Account validation failed. The campaign may not be compatible with this claim.';
+        } else {
+          errorMessage = err.message;
+        }
+      }
+      setClaimError(errorMessage);
     }
   };
 
@@ -529,12 +778,46 @@ export function AirdropClaim({ className }: AirdropClaimProps) {
               )}
               Check for Distribution
             </Button>
+
+            {/* Devnet Testing Bypass */}
+            {isDevnet() && (
+              <div className="rounded-lg border border-purple-500/30 bg-purple-500/10 p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-purple-400" />
+                  <span className="text-sm font-medium text-purple-300">Devnet Testing Mode</span>
+                </div>
+                <p className="text-xs text-purple-400/70">
+                  Skip distribution wait and test the claim flow directly. This transfers {CAMPAIGN_INFO.tokenSymbol} tokens from your wallet to the destination.
+                </p>
+                <Button
+                  onClick={() => setDevnetTestMode(true)}
+                  className="w-full bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/50 text-purple-300"
+                  variant="outline"
+                >
+                  <Sparkles className="w-4 h-4 mr-2" />
+                  Enable Test Mode & Skip Wait
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
         {/* Ready to Claim */}
         {pageStatus === 'ready_to_claim' && claimStatus !== 'success' && (
           <div className="space-y-4">
+            {/* Test Mode Indicator */}
+            {isDevnet() && devnetTestMode && (
+              <div className="rounded-lg p-3 border border-purple-500/30 bg-purple-500/10">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-purple-400" />
+                  <span className="text-sm font-medium text-purple-300">Devnet Test Mode Active</span>
+                </div>
+                <p className="text-xs text-purple-400/70 mt-1">
+                  Tokens will be claimed from the campaign vault to your connected wallet via the on-chain program.
+                </p>
+              </div>
+            )}
+
             {/* Balance */}
             <div className="rounded-lg p-4 border border-green-500/30 bg-green-500/5">
               <div className="flex items-center gap-2 mb-2">
@@ -542,47 +825,85 @@ export function AirdropClaim({ className }: AirdropClaimProps) {
                 <span className="text-sm font-medium text-green-300">Ready to Claim!</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-slate-400">Available:</span>
-                <span className="text-2xl font-bold text-white">{shadowBalance.toFixed(4)} SOL</span>
+                <span className="text-slate-400">
+                  {isDevnet() && devnetTestMode ? 'Reward Amount:' : 'Available:'}
+                </span>
+                <span className="text-2xl font-bold text-white">
+                  {isDevnet() && devnetTestMode
+                    ? `${rewardAmount.toLocaleString()} ${CAMPAIGN_INFO.tokenSymbol}`
+                    : `${shadowBalance.toFixed(4)} SOL`}
+                </span>
               </div>
             </div>
 
             {/* Claiming in progress */}
             {claimStatus === 'claiming' ? (
               <div className="rounded-lg p-4 border border-cyan-500/30 bg-cyan-500/5">
-                <p className="text-sm font-medium text-cyan-300 mb-3">Claiming privately...</p>
+                <p className="text-sm font-medium text-cyan-300 mb-3">
+                  {isDevnet() && devnetTestMode ? 'Claiming from campaign...' : 'Claiming privately...'}
+                </p>
                 <ClaimProgress stage={claimStage} />
               </div>
             ) : (
               <>
-                {/* Destination Input */}
-                <div className="space-y-2">
-                  <Label htmlFor="destination" className="text-white flex items-center gap-2">
-                    Destination Wallet
-                    <span className="text-xs text-green-400">(Use a fresh wallet for privacy!)</span>
-                  </Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="destination"
-                      placeholder="Enter any Solana wallet"
-                      value={destinationWallet}
-                      onChange={(e) => {
-                        setDestinationWallet(e.target.value);
-                        setClaimError(null);
-                      }}
-                      className="flex-1 bg-slate-800/50 border-slate-700"
-                    />
-                    <Button variant="outline" size="icon" onClick={useCurrentWallet} title="Use current wallet">
-                      <Wallet className="w-4 h-4" />
-                    </Button>
+                {/* Destination Input - only show for production (ShadowWire) mode */}
+                {!(isDevnet() && devnetTestMode) && (
+                  <div className="space-y-2">
+                    <Label htmlFor="destination" className="text-white flex items-center gap-2">
+                      Destination Wallet
+                      <span className="text-xs text-green-400">(Use a fresh wallet for privacy!)</span>
+                    </Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="destination"
+                        placeholder="Enter any Solana wallet"
+                        value={destinationWallet}
+                        onChange={(e) => {
+                          setDestinationWallet(e.target.value);
+                          setClaimError(null);
+                        }}
+                        className="flex-1 bg-slate-800/50 border-slate-700"
+                      />
+                      <Button variant="outline" size="icon" onClick={useCurrentWallet} title="Use current wallet">
+                        <Wallet className="w-4 h-4" />
+                      </Button>
+                    </div>
+                    <button
+                      onClick={generateFreshWallet}
+                      className="text-xs text-cyan-400 hover:text-cyan-300"
+                    >
+                      💡 Why use a fresh wallet?
+                    </button>
                   </div>
-                  <button
-                    onClick={generateFreshWallet}
-                    className="text-xs text-cyan-400 hover:text-cyan-300"
-                  >
-                    💡 Why use a fresh wallet?
-                  </button>
-                </div>
+                )}
+
+                {/* Destination Input - also show for devnet test mode for privacy */}
+                {isDevnet() && devnetTestMode && (
+                  <div className="space-y-2">
+                    <Label htmlFor="destination-devnet" className="text-white flex items-center gap-2">
+                      Destination Wallet
+                      <span className="text-xs text-green-400">(For privacy, use a different wallet!)</span>
+                    </Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="destination-devnet"
+                        placeholder="Enter destination Solana wallet"
+                        value={destinationWallet}
+                        onChange={(e) => {
+                          setDestinationWallet(e.target.value);
+                          setClaimError(null);
+                        }}
+                        className="flex-1 bg-slate-800/50 border-slate-700"
+                      />
+                      <Button variant="outline" size="icon" onClick={useCurrentWallet} title="Use current wallet (not private)">
+                        <Wallet className="w-4 h-4" />
+                      </Button>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      💡 Create a fresh wallet in your wallet app and paste its address here for maximum privacy.
+                    </p>
+                  </div>
+                )}
 
                 {claimError && (
                   <div className="rounded-md bg-red-500/20 p-3 text-sm text-red-300">{claimError}</div>
@@ -590,11 +911,13 @@ export function AirdropClaim({ className }: AirdropClaimProps) {
 
                 <Button
                   onClick={handleClaim}
-                  disabled={!destinationWallet || shadowBalance <= 0}
+                  disabled={!destinationWallet || (!(isDevnet() && devnetTestMode) && shadowBalance <= 0)}
                   className="w-full h-12 text-lg bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600"
                 >
                   <Shield className="w-5 h-5 mr-2" />
-                  Claim Privately
+                  {isDevnet() && devnetTestMode
+                    ? `Claim ${rewardAmount.toLocaleString()} ${CAMPAIGN_INFO.tokenSymbol}`
+                    : 'Claim Privately'}
                   <ArrowRight className="w-5 h-5 ml-2" />
                 </Button>
               </>
@@ -607,34 +930,71 @@ export function AirdropClaim({ className }: AirdropClaimProps) {
           <div className="space-y-4">
             <div className="rounded-lg bg-green-500/10 border border-green-500/30 p-4 text-center">
               <CheckCircle2 className="w-12 h-12 text-green-400 mx-auto mb-3" />
-              <p className="text-lg font-medium text-green-300">Claim Successful!</p>
+              <p className="text-lg font-medium text-green-300">
+                {isDevnet() && devnetTestMode ? 'Test Claim Successful!' : 'Claim Successful!'}
+              </p>
               <p className="text-sm text-green-400/70 mt-1">
-                Tokens sent privately to your destination wallet
+                {isDevnet() && devnetTestMode
+                  ? `${rewardAmount.toLocaleString()} ${CAMPAIGN_INFO.tokenSymbol} sent to your destination wallet`
+                  : 'Tokens sent privately to your destination wallet'}
               </p>
             </div>
 
             <div className="rounded-md bg-slate-800/50 p-3 text-sm">
               <p className="text-slate-400 mb-1">Destination:</p>
-              <p className="font-mono text-white text-xs break-all">{destinationWallet}</p>
+              <p className="font-mono text-white text-xs break-all">
+                {destinationWallet || wallet.publicKey?.toBase58()}
+              </p>
+              {destinationWallet && wallet.publicKey && destinationWallet !== wallet.publicKey.toBase58() && (
+                <p className="text-xs text-green-400 mt-1">🔒 Sent to a different wallet for privacy</p>
+              )}
             </div>
 
             {claimTxSignature && (
-              <a
-                href={`https://explorer.solana.com/tx/${claimTxSignature}?cluster=devnet`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2 text-sm text-cyan-400 hover:text-cyan-300"
-              >
-                View on Explorer <ExternalLink className="w-4 h-4" />
-              </a>
+              <div className="space-y-2">
+                <p className="text-xs text-slate-400 text-center">Transaction:</p>
+                <p className="font-mono text-xs text-white text-center break-all px-4">
+                  {claimTxSignature}
+                </p>
+                <div className="flex items-center justify-center gap-4">
+                  <a
+                    href={`https://solscan.io/tx/${claimTxSignature}?cluster=devnet`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 text-sm text-cyan-400 hover:text-cyan-300"
+                  >
+                    Solscan <ExternalLink className="w-3 h-3" />
+                  </a>
+                  <a
+                    href={`https://explorer.solana.com/tx/${claimTxSignature}?cluster=devnet`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 text-sm text-purple-400 hover:text-purple-300"
+                  >
+                    Explorer <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              </div>
             )}
 
             <div className="rounded-md border border-green-500/20 bg-green-500/5 p-3 text-xs text-green-400">
-              <p className="font-medium mb-1">🔒 Privacy Protected</p>
-              <p className="text-green-400/70">
-                No one can link your registration wallet to this destination. Your on-chain history
-                remains private.
-              </p>
+              {isDevnet() && devnetTestMode ? (
+                <>
+                  <p className="font-medium mb-1">🧪 Test Mode Complete</p>
+                  <p className="text-green-400/70">
+                    This was a test transaction. In production, ShadowWire would provide full privacy
+                    protection for the actual token claim.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="font-medium mb-1">🔒 Privacy Protected</p>
+                  <p className="text-green-400/70">
+                    No one can link your registration wallet to this destination. Your on-chain history
+                    remains private.
+                  </p>
+                </>
+              )}
             </div>
           </div>
         )}

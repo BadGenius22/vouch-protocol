@@ -103,6 +103,533 @@ export type VouchVerifier = {
       ]
     },
     {
+      "name": "claimAirdrop",
+      "docs": [
+        "Claim airdrop tokens from a campaign",
+        "Only registered users can claim",
+        "Tokens are transferred from campaign vault to claimer's ATA"
+      ],
+      "discriminator": [
+        137,
+        50,
+        122,
+        111,
+        89,
+        254,
+        8,
+        20
+      ],
+      "accounts": [
+        {
+          "name": "campaign",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  105,
+                  114,
+                  100,
+                  114,
+                  111,
+                  112,
+                  95,
+                  99,
+                  97,
+                  109,
+                  112,
+                  97,
+                  105,
+                  103,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "campaign.campaign_id",
+                "account": "airdropCampaign"
+              }
+            ]
+          }
+        },
+        {
+          "name": "campaignVault",
+          "docs": [
+            "Campaign token vault (ATA owned by campaign PDA)"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "campaign"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "tokenMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "tokenMint",
+          "docs": [
+            "Token mint for the campaign"
+          ]
+        },
+        {
+          "name": "registration",
+          "docs": [
+            "Registration proving eligibility"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  105,
+                  114,
+                  100,
+                  114,
+                  111,
+                  112,
+                  95,
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "campaign"
+              },
+              {
+                "kind": "account",
+                "path": "registration.nullifier",
+                "account": "airdropRegistrationAccount"
+              }
+            ]
+          }
+        },
+        {
+          "name": "claimerTokenAccount",
+          "docs": [
+            "Claimer's token account to receive tokens"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "claimer"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "tokenMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "claimer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "tokenProgram",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associatedTokenProgram",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "closeAirdropRegistration",
+      "docs": [
+        "Close registration for a campaign (prevents new registrations)",
+        "Only campaign creator can close"
+      ],
+      "discriminator": [
+        242,
+        109,
+        65,
+        233,
+        29,
+        124,
+        242,
+        167
+      ],
+      "accounts": [
+        {
+          "name": "campaign",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  105,
+                  114,
+                  100,
+                  114,
+                  111,
+                  112,
+                  95,
+                  99,
+                  97,
+                  109,
+                  112,
+                  97,
+                  105,
+                  103,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "campaign.campaign_id",
+                "account": "airdropCampaign"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "completeAirdropCampaign",
+      "docs": [
+        "Complete an airdrop campaign (marks as fully distributed)",
+        "Only campaign creator can complete"
+      ],
+      "discriminator": [
+        71,
+        192,
+        208,
+        217,
+        216,
+        121,
+        189,
+        58
+      ],
+      "accounts": [
+        {
+          "name": "campaign",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  105,
+                  114,
+                  100,
+                  114,
+                  111,
+                  112,
+                  95,
+                  99,
+                  97,
+                  109,
+                  112,
+                  97,
+                  105,
+                  103,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "campaign.campaign_id",
+                "account": "airdropCampaign"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "createAirdropCampaign",
+      "docs": [
+        "Create a new airdrop campaign",
+        "Only the campaign creator can distribute to registered addresses",
+        "Create a tiered airdrop campaign",
+        "- base_amount: Everyone gets this (open registration)",
+        "- dev_bonus: Additional amount for verified developers",
+        "- whale_bonus: Additional amount for verified whales"
+      ],
+      "discriminator": [
+        137,
+        20,
+        107,
+        226,
+        116,
+        34,
+        27,
+        215
+      ],
+      "accounts": [
+        {
+          "name": "campaign",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  105,
+                  114,
+                  100,
+                  114,
+                  111,
+                  112,
+                  95,
+                  99,
+                  97,
+                  109,
+                  112,
+                  97,
+                  105,
+                  103,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "campaignId"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "campaignId",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "tokenMint",
+          "type": "pubkey"
+        },
+        {
+          "name": "baseAmount",
+          "type": "u64"
+        },
+        {
+          "name": "devBonus",
+          "type": "u64"
+        },
+        {
+          "name": "whaleBonus",
+          "type": "u64"
+        },
+        {
+          "name": "registrationDeadline",
+          "type": "i64"
+        }
+      ]
+    },
+    {
       "name": "createCommitment",
       "docs": [
         "Initialize a new commitment for a wallet",
@@ -165,6 +692,275 @@ export type VouchVerifier = {
               32
             ]
           }
+        }
+      ]
+    },
+    {
+      "name": "fundAirdropCampaign",
+      "docs": [
+        "Fund an airdrop campaign's token vault",
+        "Only campaign creator can fund",
+        "Tokens are transferred from creator's ATA to campaign vault"
+      ],
+      "discriminator": [
+        204,
+        227,
+        11,
+        42,
+        142,
+        44,
+        121,
+        87
+      ],
+      "accounts": [
+        {
+          "name": "campaign",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  105,
+                  114,
+                  100,
+                  114,
+                  111,
+                  112,
+                  95,
+                  99,
+                  97,
+                  109,
+                  112,
+                  97,
+                  105,
+                  103,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "campaign.campaign_id",
+                "account": "airdropCampaign"
+              }
+            ]
+          }
+        },
+        {
+          "name": "campaignVault",
+          "docs": [
+            "Campaign token vault (ATA owned by campaign PDA)"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "campaign"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "tokenMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "tokenMint",
+          "docs": [
+            "Token mint for the campaign"
+          ]
+        },
+        {
+          "name": "creatorTokenAccount",
+          "docs": [
+            "Creator's token account to fund from"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "creator"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "tokenMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "tokenProgram",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associatedTokenProgram",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
         }
       ]
     },
@@ -339,6 +1135,111 @@ export type VouchVerifier = {
         }
       ],
       "args": []
+    },
+    {
+      "name": "markAirdropDistributed",
+      "docs": [
+        "Mark a registration as distributed (after sending via ShadowWire)",
+        "Only campaign creator can mark distributions"
+      ],
+      "discriminator": [
+        87,
+        183,
+        242,
+        84,
+        106,
+        43,
+        9,
+        210
+      ],
+      "accounts": [
+        {
+          "name": "campaign",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  105,
+                  114,
+                  100,
+                  114,
+                  111,
+                  112,
+                  95,
+                  99,
+                  97,
+                  109,
+                  112,
+                  97,
+                  105,
+                  103,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "campaign.campaign_id",
+                "account": "airdropCampaign"
+              }
+            ]
+          }
+        },
+        {
+          "name": "registration",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  105,
+                  114,
+                  100,
+                  114,
+                  111,
+                  112,
+                  95,
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "campaign"
+              },
+              {
+                "kind": "account",
+                "path": "registration.nullifier",
+                "account": "airdropRegistrationAccount"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "txSignature",
+          "type": "string"
+        }
+      ]
     },
     {
       "name": "pauseProtocol",
@@ -553,6 +1454,253 @@ export type VouchVerifier = {
               64
             ]
           }
+        }
+      ]
+    },
+    {
+      "name": "registerForAirdrop",
+      "docs": [
+        "Register for an airdrop campaign using a verified Vouch credential",
+        "Gets base_amount + bonus (dev_bonus or whale_bonus based on credential)",
+        "Links the user's nullifier to their ShadowWire address for private distribution"
+      ],
+      "discriminator": [
+        165,
+        43,
+        118,
+        222,
+        66,
+        37,
+        79,
+        178
+      ],
+      "accounts": [
+        {
+          "name": "campaign",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  105,
+                  114,
+                  100,
+                  114,
+                  111,
+                  112,
+                  95,
+                  99,
+                  97,
+                  109,
+                  112,
+                  97,
+                  105,
+                  103,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "campaign.campaign_id",
+                "account": "airdropCampaign"
+              }
+            ]
+          }
+        },
+        {
+          "name": "nullifierAccount",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  110,
+                  117,
+                  108,
+                  108,
+                  105,
+                  102,
+                  105,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "nullifier_account.nullifier",
+                "account": "nullifierAccount"
+              }
+            ]
+          }
+        },
+        {
+          "name": "registration",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  105,
+                  114,
+                  100,
+                  114,
+                  111,
+                  112,
+                  95,
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "campaign"
+              },
+              {
+                "kind": "account",
+                "path": "nullifier_account.nullifier",
+                "account": "nullifierAccount"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "shadowWireAddress",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "registerForAirdropOpen",
+      "docs": [
+        "Register for an airdrop campaign without verification (open registration)",
+        "Gets only base_amount (no bonus)",
+        "Uses wallet pubkey hash as unique identifier to prevent double registration"
+      ],
+      "discriminator": [
+        111,
+        225,
+        229,
+        73,
+        34,
+        45,
+        222,
+        212
+      ],
+      "accounts": [
+        {
+          "name": "campaign",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  105,
+                  114,
+                  100,
+                  114,
+                  111,
+                  112,
+                  95,
+                  99,
+                  97,
+                  109,
+                  112,
+                  97,
+                  105,
+                  103,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "campaign.campaign_id",
+                "account": "airdropCampaign"
+              }
+            ]
+          }
+        },
+        {
+          "name": "registration",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  105,
+                  114,
+                  100,
+                  114,
+                  111,
+                  112,
+                  95,
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "campaign"
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "shadowWireAddress",
+          "type": "string"
         }
       ]
     },
@@ -774,6 +1922,32 @@ export type VouchVerifier = {
   ],
   "accounts": [
     {
+      "name": "airdropCampaign",
+      "discriminator": [
+        235,
+        102,
+        51,
+        70,
+        37,
+        179,
+        248,
+        13
+      ]
+    },
+    {
+      "name": "airdropRegistrationAccount",
+      "discriminator": [
+        201,
+        136,
+        215,
+        80,
+        195,
+        228,
+        3,
+        44
+      ]
+    },
+    {
       "name": "commitmentAccount",
       "discriminator": [
         155,
@@ -851,6 +2025,97 @@ export type VouchVerifier = {
         217,
         38,
         179
+      ]
+    },
+    {
+      "name": "airdropCampaignCompleted",
+      "discriminator": [
+        186,
+        127,
+        220,
+        41,
+        180,
+        108,
+        224,
+        1
+      ]
+    },
+    {
+      "name": "airdropCampaignCreated",
+      "discriminator": [
+        14,
+        65,
+        106,
+        129,
+        21,
+        122,
+        161,
+        18
+      ]
+    },
+    {
+      "name": "airdropCampaignFunded",
+      "discriminator": [
+        76,
+        62,
+        77,
+        52,
+        243,
+        202,
+        108,
+        242
+      ]
+    },
+    {
+      "name": "airdropClaimed",
+      "discriminator": [
+        125,
+        251,
+        195,
+        183,
+        202,
+        126,
+        89,
+        68
+      ]
+    },
+    {
+      "name": "airdropDistributed",
+      "discriminator": [
+        150,
+        40,
+        93,
+        36,
+        137,
+        4,
+        173,
+        131
+      ]
+    },
+    {
+      "name": "airdropRegistration",
+      "discriminator": [
+        213,
+        182,
+        106,
+        29,
+        31,
+        253,
+        128,
+        201
+      ]
+    },
+    {
+      "name": "airdropRegistrationClosed",
+      "discriminator": [
+        149,
+        90,
+        172,
+        193,
+        234,
+        84,
+        243,
+        184
       ]
     },
     {
@@ -1041,6 +2306,71 @@ export type VouchVerifier = {
       "code": 6013,
       "name": "overflow",
       "msg": "Arithmetic overflow"
+    },
+    {
+      "code": 6014,
+      "name": "nameTooLong",
+      "msg": "Campaign name too long (max 64 chars)"
+    },
+    {
+      "code": 6015,
+      "name": "invalidDeadline",
+      "msg": "Registration deadline must be in the future"
+    },
+    {
+      "code": 6016,
+      "name": "invalidAmount",
+      "msg": "Amount must be greater than zero"
+    },
+    {
+      "code": 6017,
+      "name": "campaignNotOpen",
+      "msg": "Campaign is not open for registration"
+    },
+    {
+      "code": 6018,
+      "name": "registrationClosed",
+      "msg": "Campaign registration period has closed"
+    },
+    {
+      "code": 6019,
+      "name": "nullifierNotVerified",
+      "msg": "Nullifier has not been verified (no Vouch credential)"
+    },
+    {
+      "code": 6020,
+      "name": "invalidShadowWireAddress",
+      "msg": "Invalid ShadowWire address format"
+    },
+    {
+      "code": 6021,
+      "name": "alreadyDistributed",
+      "msg": "Airdrop has already been distributed to this registration"
+    },
+    {
+      "code": 6022,
+      "name": "campaignNotClosed",
+      "msg": "Campaign must be closed before completing"
+    },
+    {
+      "code": 6023,
+      "name": "invalidCampaign",
+      "msg": "Registration does not belong to this campaign"
+    },
+    {
+      "code": 6024,
+      "name": "insufficientFunds",
+      "msg": "Insufficient funds in campaign vault"
+    },
+    {
+      "code": 6025,
+      "name": "alreadyClaimed",
+      "msg": "Airdrop has already been claimed"
+    },
+    {
+      "code": 6026,
+      "name": "invalidMint",
+      "msg": "Token mint does not match campaign"
     }
   ],
   "types": [
@@ -1056,6 +2386,516 @@ export type VouchVerifier = {
           {
             "name": "newAdmin",
             "type": "pubkey"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "airdropCampaign",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "campaignId",
+            "docs": [
+              "Unique campaign identifier (hash)"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "creator",
+            "docs": [
+              "Campaign creator (project distributing tokens)"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "docs": [
+              "Human-readable campaign name"
+            ],
+            "type": "string"
+          },
+          {
+            "name": "tokenMint",
+            "docs": [
+              "Token mint for the airdrop"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "baseAmount",
+            "docs": [
+              "Base amount for anyone (tiered: open registration)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "devBonus",
+            "docs": [
+              "Bonus amount for verified developers (gets base + dev_bonus)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "whaleBonus",
+            "docs": [
+              "Bonus amount for verified whales (gets base + whale_bonus)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "registrationDeadline",
+            "docs": [
+              "Registration deadline (unix timestamp)"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "status",
+            "docs": [
+              "Campaign status"
+            ],
+            "type": {
+              "defined": {
+                "name": "campaignStatus"
+              }
+            }
+          },
+          {
+            "name": "totalRegistrations",
+            "docs": [
+              "Total number of registrations"
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "openRegistrations",
+            "docs": [
+              "Number of open (unverified) registrations"
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "devRegistrations",
+            "docs": [
+              "Number of developer registrations"
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "whaleRegistrations",
+            "docs": [
+              "Number of whale registrations"
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "createdAt",
+            "docs": [
+              "Campaign creation timestamp"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "completedAt",
+            "docs": [
+              "Campaign completion timestamp (0 if not completed)"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "vaultBalance",
+            "docs": [
+              "Current vault balance (tokens available for claims)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "totalClaimed",
+            "docs": [
+              "Total number of claims made"
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "airdropCampaignCompleted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "campaignId",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "totalDistributed",
+            "type": "u32"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "airdropCampaignCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "campaignId",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "tokenMint",
+            "type": "pubkey"
+          },
+          {
+            "name": "baseAmount",
+            "type": "u64"
+          },
+          {
+            "name": "devBonus",
+            "type": "u64"
+          },
+          {
+            "name": "whaleBonus",
+            "type": "u64"
+          },
+          {
+            "name": "registrationDeadline",
+            "type": "i64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "airdropCampaignFunded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "campaignId",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "funder",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "totalFunded",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "airdropClaimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "campaignId",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "claimer",
+            "type": "pubkey"
+          },
+          {
+            "name": "nullifier",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "proofType",
+            "type": {
+              "defined": {
+                "name": "proofType"
+              }
+            }
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "airdropDistributed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "campaignId",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "nullifier",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "shadowWireAddress",
+            "type": "string"
+          },
+          {
+            "name": "txSignature",
+            "type": "string"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "airdropRegistration",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "campaignId",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "nullifier",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "shadowWireAddress",
+            "type": "string"
+          },
+          {
+            "name": "proofType",
+            "type": {
+              "defined": {
+                "name": "proofType"
+              }
+            }
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "airdropRegistrationAccount",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "campaign",
+            "docs": [
+              "Campaign this registration belongs to"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "nullifier",
+            "docs": [
+              "Nullifier from the Vouch credential"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "shadowWireAddress",
+            "docs": [
+              "User's ShadowWire address for private receipt"
+            ],
+            "type": "string"
+          },
+          {
+            "name": "proofType",
+            "docs": [
+              "Type of credential (dev or whale)"
+            ],
+            "type": {
+              "defined": {
+                "name": "proofType"
+              }
+            }
+          },
+          {
+            "name": "registeredAt",
+            "docs": [
+              "Registration timestamp"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "isDistributed",
+            "docs": [
+              "Whether tokens have been distributed (ShadowWire flow)"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "distributedAt",
+            "docs": [
+              "Distribution timestamp (0 if not distributed)"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "distributionTx",
+            "docs": [
+              "Distribution transaction signature"
+            ],
+            "type": "string"
+          },
+          {
+            "name": "isClaimed",
+            "docs": [
+              "Whether tokens have been claimed (direct claim flow)"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "claimedAt",
+            "docs": [
+              "Claim timestamp (0 if not claimed)"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "claimedAmount",
+            "docs": [
+              "Amount of tokens claimed"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "airdropRegistrationClosed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "campaignId",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "totalRegistrations",
+            "type": "u32"
+          },
+          {
+            "name": "devRegistrations",
+            "type": "u32"
+          },
+          {
+            "name": "whaleRegistrations",
+            "type": "u32"
           },
           {
             "name": "timestamp",
@@ -1115,6 +2955,23 @@ export type VouchVerifier = {
                 64
               ]
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "campaignStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "open"
+          },
+          {
+            "name": "registrationClosed"
+          },
+          {
+            "name": "completed"
           }
         ]
       }
