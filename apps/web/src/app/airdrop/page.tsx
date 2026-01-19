@@ -172,11 +172,9 @@ function AirdropPageContent() {
     setPageState('register');
   };
 
-  const handleRegistrationComplete = (shadowWireAddress: string) => {
-    // Store the ShadowWire address for claiming later
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('vouch_shadowwire_address', shadowWireAddress);
-    }
+  const handleRegistrationComplete = () => {
+    // Registration complete - ShadowWire address is now auto-set to connected wallet
+    // The AirdropRegistration component handles localStorage storage
     setPageState('claim');
   };
 

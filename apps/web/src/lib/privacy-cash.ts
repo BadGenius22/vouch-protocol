@@ -125,7 +125,10 @@ let PrivacyCashClass: PrivacyCashConstructor | null = null;
 
 const sdkLoader = createResettableSingleton(
   async () => {
-    const sdk = await import('privacycash');
+    // Use webpackIgnore to prevent webpack from bundling this at build time
+    // NOTE: privacycash SDK uses node:path and is not browser-compatible
+    // This will fail at runtime in browser - Privacy Cash requires server-side execution
+    const sdk = await import(/* webpackIgnore: true */ 'privacycash');
     PrivacyCashClass = sdk.PrivacyCash as unknown as PrivacyCashConstructor;
 
     if (!PrivacyCashClass) {

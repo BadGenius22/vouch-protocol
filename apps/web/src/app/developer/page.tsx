@@ -9,16 +9,40 @@ import { StepIndicator } from '@/components/ui/step-indicator';
 import { ProofLoading } from '@/components/ui/proof-loading';
 import { WalletButton } from '@/components/wallet/wallet-button';
 import { getDeployedPrograms } from '@/app/actions/helius';
-import type { ProgramData, ProofResult, VerificationResult } from '@/lib/types';
-import { CheckCircle, XCircle, ExternalLink, Code2, Shield, ArrowRight, Loader2, BadgeCheck } from 'lucide-react';
+import type { ProgramData, VerificationResult } from '@/lib/types';
+import type { ProveFlowProgress, ProveFlowResult, PrivacyProvider } from '@/lib/prove-flow';
+import {
+  CheckCircle,
+  XCircle,
+  ExternalLink,
+  Code2,
+  Shield,
+  ArrowRight,
+  Loader2,
+  BadgeCheck,
+  Lock,
+  Eye,
+  EyeOff,
+  Info,
+  Coins,
+  Zap,
+  Globe,
+} from 'lucide-react';
 
-type Step = 'connect' | 'checking' | 'already-verified' | 'fetch' | 'generate' | 'verify' | 'complete';
+type Step =
+  | 'connect'
+  | 'checking'
+  | 'already-verified'
+  | 'fetch'
+  | 'ready'
+  | 'proving'
+  | 'complete';
 
 const STEPS = [
   { id: 'connect', label: 'Connect' },
   { id: 'fetch', label: 'Fetch' },
-  { id: 'generate', label: 'Prove' },
-  { id: 'verify', label: 'Verify' },
+  { id: 'ready', label: 'Review' },
+  { id: 'proving', label: 'Prove' },
   { id: 'complete', label: 'Done' },
 ];
 
@@ -47,10 +71,49 @@ function DeveloperPageContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [programs, setPrograms] = useState<ProgramData[]>([]);
-  const [proofResult, setProofResult] = useState<ProofResult | null>(null);
   const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null);
   const [proofProgress, setProofProgress] = useState(0);
+  const [proofMessage, setProofMessage] = useState('');
   const [existingNullifier, setExistingNullifier] = useState<string | null>(null);
+  const [flowResult, setFlowResult] = useState<ProveFlowResult | null>(null);
+
+  // Privacy & Network state
+  const [privacyAvailable, setPrivacyAvailable] = useState(false);
+  const [privacyProvider, setPrivacyProvider] = useState<PrivacyProvider>('none');
+  const [networkName, setNetworkName] = useState<string>('');
+  const [costEstimate, setCostEstimate] = useState<{
+    verificationCost: number;
+    privacyCost: number;
+    networkFees: number;
+    totalCost: number;
+  } | null>(null);
+
+  // Check privacy availability and network on mount
+  useEffect(() => {
+    async function checkPrivacyAndNetwork() {
+      try {
+        const { getPrivacyInfo, estimateProveFlowCost } = await import('@/lib/prove-flow');
+        const privacyInfo = await getPrivacyInfo(connection);
+
+        setPrivacyAvailable(privacyInfo.available);
+        setPrivacyProvider(privacyInfo.provider);
+        setNetworkName(privacyInfo.network);
+
+        // Estimate costs
+        const estimate = await estimateProveFlowCost(connection, !privacyInfo.available);
+        setCostEstimate({
+          verificationCost: estimate.verificationCost,
+          privacyCost: estimate.privacyCost,
+          networkFees: estimate.networkFees,
+          totalCost: estimate.totalCost,
+        });
+      } catch {
+        setPrivacyAvailable(false);
+        setNetworkName('unknown');
+      }
+    }
+    checkPrivacyAndNetwork();
+  }, [connection]);
 
   // Check if wallet has already verified when connected
   useEffect(() => {
@@ -68,14 +131,12 @@ function DeveloperPageContent() {
         const { isNullifierUsed, isProgramDeployed } = await import('@/lib/verify');
         const { preloadCircuits } = await import('@/lib/circuit');
 
-        // Compute nullifier (synchronous)
         const nullifier = computeNullifierForWallet(wallet.publicKey.toBase58(), 'developer');
 
-        // Run all checks in parallel: program deployed, nullifier used, and preload circuits
         const [deployed, used] = await Promise.all([
           isProgramDeployed(connection),
           isNullifierUsed(connection, nullifier),
-          preloadCircuits(), // Warm up circuit cache in background
+          preloadCircuits(),
         ]);
 
         if (!deployed) {
@@ -99,14 +160,9 @@ function DeveloperPageContent() {
   }, [wallet.publicKey, connection]);
 
   const getCompletedSteps = (): string[] => {
-    const stepOrder = ['connect', 'fetch', 'generate', 'verify', 'complete'];
-    // Handle special steps that aren't in the display order
-    if (step === 'checking') {
-      return []; // Still checking, nothing completed yet
-    }
-    if (step === 'already-verified') {
-      return stepOrder; // All steps completed (already verified)
-    }
+    const stepOrder = ['connect', 'fetch', 'ready', 'proving', 'complete'];
+    if (step === 'checking') return [];
+    if (step === 'already-verified') return stepOrder;
     const currentIndex = stepOrder.indexOf(step);
     return currentIndex >= 0 ? stepOrder.slice(0, currentIndex) : [];
   };
@@ -123,7 +179,7 @@ function DeveloperPageContent() {
         throw new Error(result.error || 'Failed to fetch programs');
       }
       setPrograms(result.data);
-      setStep('generate');
+      setStep('ready');
     } catch (err) {
       setStep('connect');
       setError(err instanceof Error ? err.message : 'Failed to fetch data');
@@ -132,105 +188,70 @@ function DeveloperPageContent() {
     }
   }, [wallet.publicKey]);
 
-  const handleGenerateProof = useCallback(async () => {
+  const handleProve = useCallback(async () => {
     if (!wallet.publicKey || programs.length === 0) return;
     setLoading(true);
     setError(null);
     setProofProgress(0);
-
-    let progressInterval: NodeJS.Timeout | null = null;
-
-    try {
-      progressInterval = setInterval(() => {
-        setProofProgress((prev) => Math.min(prev + Math.random() * 15, 90));
-      }, 500);
-
-      const { generateDevReputationProof } = await import('@/lib/proof');
-      const result = await generateDevReputationProof({
-        walletPubkey: wallet.publicKey.toBase58(),
-        programs,
-        minTvl: 10000,
-      });
-
-      clearInterval(progressInterval);
-      setProofProgress(100);
-
-      setTimeout(() => {
-        setProofResult(result);
-        setStep('verify');
-        setLoading(false);
-      }, 500);
-    } catch (err) {
-      if (progressInterval) clearInterval(progressInterval);
-      setProofProgress(0);
-      setError(err instanceof Error ? err.message : 'Failed to generate proof');
-      setLoading(false);
-    }
-  }, [wallet.publicKey, programs]);
-
-  const handleSubmitProof = useCallback(async () => {
-    if (!wallet.publicKey || !proofResult || !wallet.signTransaction) return;
-    setLoading(true);
-    setError(null);
+    setProofMessage('Initializing...');
+    setStep('proving');
 
     try {
-      const { isProgramDeployed } = await import('@/lib/verify');
-      const { submitProofWithVerifier, isVerifierAvailable } = await import('@/lib/verifier-client');
+      const { proveDevReputation } = await import('@/lib/prove-flow');
 
-      const deployed = await isProgramDeployed(connection);
+      const progressCallback = (progress: ProveFlowProgress) => {
+        setProofProgress(progress.percentage);
+        setProofMessage(progress.message);
+      };
 
-      if (!deployed) {
-        setVerificationResult({
-          success: true,
-          signature: 'demo_' + Date.now().toString(36),
-        });
-        setStep('complete');
-        setLoading(false);
-        return;
-      }
-
-      // Check if verifier service is available
-      const verifierAvailable = await isVerifierAvailable();
-      if (!verifierAvailable) {
-        setError('Verifier service is not available. Please try again later.');
-        setLoading(false);
-        return;
-      }
-
-      const result = await submitProofWithVerifier(
-        connection,
-        proofResult,
-        'developer',
-        wallet.publicKey,
-        wallet.signTransaction
+      const result = await proveDevReputation(
+        {
+          walletPubkey: wallet.publicKey.toBase58(),
+          programs,
+          minTvl: 10000,
+        },
+        {
+          wallet,
+          connection,
+          skipPrivacy: !privacyAvailable,
+          useVerifierService: true,
+          onProgress: progressCallback,
+          timeoutMs: 600000,
+        }
       );
 
-      setVerificationResult(result);
-      if (result.success) {
+      setFlowResult(result);
+
+      if (result.success && result.verification) {
+        setVerificationResult(result.verification);
         setStep('complete');
-        // Store nullifier in localStorage for airdrop registration
-        if (proofResult.nullifier && typeof window !== 'undefined') {
-          localStorage.setItem('vouch_nullifier', proofResult.nullifier);
+
+        // Store nullifier for airdrop registration
+        if (result.proof?.nullifier && typeof window !== 'undefined') {
+          localStorage.setItem('vouch_nullifier', result.proof.nullifier);
           localStorage.setItem('vouch_proof_type', 'developer');
         }
       } else {
         setError(result.error || 'Verification failed');
+        setStep('ready');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to submit proof');
+      setError(err instanceof Error ? err.message : 'Failed to prove');
+      setStep('ready');
     } finally {
       setLoading(false);
     }
-  }, [wallet.publicKey, wallet.signTransaction, proofResult, connection]);
+  }, [wallet, connection, programs, privacyAvailable]);
 
   const handleReset = useCallback(() => {
     setStep('connect');
     setLoading(false);
     setError(null);
     setPrograms([]);
-    setProofResult(null);
     setVerificationResult(null);
     setProofProgress(0);
+    setProofMessage('');
+    setFlowResult(null);
   }, []);
 
   const totalTVL = programs.reduce((sum, p) => sum + p.estimatedTVL, 0);
@@ -256,6 +277,23 @@ function DeveloperPageContent() {
           Prove you&apos;ve deployed successful programs without revealing your identity
         </p>
       </div>
+
+      {/* Network Badge */}
+      {networkName && (
+        <div className="flex justify-center mb-6">
+          <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-mono ${
+            networkName === 'mainnet'
+              ? 'bg-accent/10 text-accent border border-accent/30'
+              : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+          }`}>
+            <Globe className="w-3 h-3" />
+            {networkName.toUpperCase()}
+            {networkName !== 'mainnet' && (
+              <span className="text-muted-foreground">• Privacy pools unavailable</span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Step Indicator */}
       <div className="mb-8">
@@ -293,8 +331,82 @@ function DeveloperPageContent() {
                     <p className="text-xs text-muted-foreground mb-1 font-mono uppercase tracking-wider">
                       Connected Wallet
                     </p>
-                    <p className="font-mono text-sm text-primary break-all">{wallet.publicKey.toBase58()}</p>
+                    <p className="font-mono text-sm text-primary break-all">
+                      {wallet.publicKey.toBase58()}
+                    </p>
                   </div>
+
+                  {/* Privacy & Cost Info */}
+                  <div className={`p-4 rounded-xl border ${
+                    privacyAvailable
+                      ? 'border-accent/30 bg-accent/5'
+                      : 'border-border/50 bg-muted/30'
+                  }`}>
+                    <div className="flex items-center gap-2 mb-3">
+                      {privacyAvailable ? (
+                        <>
+                          <EyeOff className="w-4 h-4 text-accent" />
+                          <span className="text-sm font-semibold text-accent">
+                            Privacy Mode Available
+                          </span>
+                          <span className="text-xs px-2 py-0.5 bg-accent/20 text-accent rounded">
+                            ShadowWire
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <Eye className="w-4 h-4 text-muted-foreground" />
+                          <span className="text-sm font-semibold text-muted-foreground">
+                            Standard Mode
+                          </span>
+                          <span className="text-xs px-2 py-0.5 bg-muted text-muted-foreground rounded">
+                            {networkName !== 'mainnet' ? 'Testnet' : 'Fallback'}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-3">
+                      {privacyAvailable
+                        ? 'Your proof will be submitted through ShadowWire privacy pools. No one can link the transaction to your wallet.'
+                        : networkName !== 'mainnet'
+                          ? `Privacy pools are only available on mainnet. On ${networkName}, your proof will be submitted from your connected wallet.`
+                          : 'Privacy layer unavailable. Your proof will be submitted from your connected wallet.'}
+                    </p>
+
+                    {/* Cost Breakdown */}
+                    {costEstimate && (
+                      <div className="space-y-2 pt-3 border-t border-border/30">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground flex items-center gap-1">
+                            <Coins className="w-3 h-3" />
+                            Verification
+                          </span>
+                          <span className="font-mono text-white">{costEstimate.verificationCost.toFixed(4)} SOL</span>
+                        </div>
+                        {privacyAvailable && costEstimate.privacyCost > 0 && (
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-muted-foreground flex items-center gap-1">
+                              <Lock className="w-3 h-3" />
+                              Privacy Fee
+                            </span>
+                            <span className="font-mono text-white">{costEstimate.privacyCost.toFixed(4)} SOL</span>
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground flex items-center gap-1">
+                            <Zap className="w-3 h-3" />
+                            Network
+                          </span>
+                          <span className="font-mono text-white">{costEstimate.networkFees.toFixed(4)} SOL</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm pt-2 border-t border-border/30">
+                          <span className="text-muted-foreground font-medium">Total</span>
+                          <span className="font-mono font-bold text-primary">{costEstimate.totalCost.toFixed(4)} SOL</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   <GlowButton onClick={handleFetchData} disabled={loading} glowColor="cyan" className="w-full">
                     {loading ? 'Fetching...' : 'Fetch My Programs'}
                     <ArrowRight className="ml-2 h-4 w-4" />
@@ -304,7 +416,7 @@ function DeveloperPageContent() {
             </div>
           )}
 
-          {/* Checking Step - Verifying if already proven */}
+          {/* Checking Step */}
           {step === 'checking' && (
             <div className="text-center py-8">
               <Loader2 className="w-12 h-12 text-primary animate-spin mx-auto mb-4" />
@@ -341,16 +453,17 @@ function DeveloperPageContent() {
             </div>
           )}
 
-          {/* Fetch Step - Show loading */}
+          {/* Fetch Step */}
           {step === 'fetch' && loading && (
             <div className="py-8">
               <ProofLoading status="loading" progress={50} message="Fetching your deployed programs..." />
             </div>
           )}
 
-          {/* Generate Step */}
-          {step === 'generate' && !loading && (
+          {/* Ready Step */}
+          {step === 'ready' && !loading && (
             <div className="space-y-6">
+              {/* Programs Display */}
               <div className="p-4 rounded-xl bg-muted/50 border border-border/50">
                 <h3 className="font-display font-semibold mb-3 flex items-center gap-2">
                   <Code2 className="w-4 h-4 text-primary" />
@@ -358,7 +471,10 @@ function DeveloperPageContent() {
                 </h3>
                 <ul className="space-y-2">
                   {programs.map((p, i) => (
-                    <li key={i} className="flex justify-between items-center text-sm py-2 border-b border-border/30 last:border-0">
+                    <li
+                      key={i}
+                      className="flex justify-between items-center text-sm py-2 border-b border-border/30 last:border-0"
+                    >
                       <span className="font-mono text-muted-foreground">{p.address.slice(0, 16)}...</span>
                       <span className="text-accent font-mono">${p.estimatedTVL.toLocaleString()}</span>
                     </li>
@@ -366,7 +482,9 @@ function DeveloperPageContent() {
                 </ul>
                 <div className="mt-4 pt-4 border-t border-border/50 flex justify-between items-center">
                   <span className="font-display font-semibold">Total TVL</span>
-                  <span className={`font-mono text-lg ${meetsThreshold ? 'text-accent text-glow-green' : 'text-destructive'}`}>
+                  <span
+                    className={`font-mono text-lg ${meetsThreshold ? 'text-accent text-glow-green' : 'text-destructive'}`}
+                  >
                     ${totalTVL.toLocaleString()}
                   </span>
                 </div>
@@ -374,13 +492,71 @@ function DeveloperPageContent() {
 
               {meetsThreshold ? (
                 <>
-                  <GlowButton onClick={handleGenerateProof} disabled={loading} glowColor="cyan" className="w-full">
-                    Generate ZK Proof
-                    <Shield className="ml-2 h-4 w-4" />
+                  {/* Privacy Status Banner */}
+                  <div className={`p-4 rounded-xl border ${
+                    privacyAvailable
+                      ? 'border-accent/30 bg-accent/5'
+                      : 'border-amber-500/30 bg-amber-500/5'
+                  }`}>
+                    <div className="flex items-center gap-3">
+                      {privacyAvailable ? (
+                        <>
+                          <div className="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center">
+                            <EyeOff className="w-5 h-5 text-accent" />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-accent">Maximum Privacy</p>
+                            <p className="text-xs text-muted-foreground">
+                              Your proof will be submitted anonymously via ShadowWire
+                            </p>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center">
+                            <Eye className="w-5 h-5 text-amber-500" />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-amber-400">Standard Mode</p>
+                            <p className="text-xs text-muted-foreground">
+                              Proof is private, but transaction is visible on {networkName}
+                            </p>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Info Box */}
+                  <div className="p-3 rounded-lg bg-muted/30 border border-border/30">
+                    <div className="flex items-start gap-2">
+                      <Info className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                      <p className="text-xs text-muted-foreground">
+                        Your ZK proof is generated locally in your browser. Your private data (wallet address, TVL details)
+                        never leaves your device. Only the cryptographic proof is submitted to Solana.
+                      </p>
+                    </div>
+                  </div>
+
+                  <GlowButton
+                    onClick={handleProve}
+                    disabled={loading}
+                    glowColor={privacyAvailable ? 'green' : 'cyan'}
+                    className="w-full"
+                  >
+                    {privacyAvailable ? (
+                      <>
+                        <EyeOff className="mr-2 h-4 w-4" />
+                        Prove Privately
+                      </>
+                    ) : (
+                      <>
+                        <Shield className="mr-2 h-4 w-4" />
+                        Generate Proof
+                      </>
+                    )}
+                    <ArrowRight className="ml-2 h-4 w-4" />
                   </GlowButton>
-                  <p className="text-xs text-center text-muted-foreground">
-                    Proof generated in your browser. Your data never leaves your device.
-                  </p>
                 </>
               ) : (
                 <div className="text-center p-4 rounded-xl bg-destructive/5 border border-destructive/20">
@@ -391,51 +567,15 @@ function DeveloperPageContent() {
             </div>
           )}
 
-          {/* Proof Generation Loading */}
-          {step === 'generate' && loading && (
+          {/* Proving Step */}
+          {step === 'proving' && loading && (
             <div className="py-8">
-              <ProofLoading status="loading" progress={proofProgress} />
-            </div>
-          )}
-
-          {/* Verify Step */}
-          {step === 'verify' && proofResult && !loading && (
-            <div className="space-y-6">
-              <div className="p-4 rounded-xl bg-accent/5 border border-accent/20">
-                <div className="flex items-center gap-3 mb-3">
-                  <CheckCircle className="w-6 h-6 text-accent" />
-                  <span className="font-display font-semibold text-accent">Proof Generated!</span>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Your ZK proof proves you meet the developer criteria without revealing your wallet address.
+              <ProofLoading status="loading" progress={proofProgress} message={proofMessage} />
+              {privacyAvailable && proofProgress < 30 && (
+                <p className="text-xs text-center text-muted-foreground mt-4">
+                  Depositing to ShadowWire privacy pool...
                 </p>
-              </div>
-
-              <div className="p-4 rounded-xl bg-muted/50 border border-border/50 space-y-3">
-                <div>
-                  <p className="text-xs text-muted-foreground font-mono uppercase tracking-wider">Proof Size</p>
-                  <p className="font-mono text-primary">{proofResult.proof.length} bytes</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground font-mono uppercase tracking-wider">Nullifier Hash</p>
-                  <p className="font-mono text-xs text-muted-foreground break-all">{proofResult.nullifier.slice(0, 48)}...</p>
-                </div>
-              </div>
-
-              <GlowButton onClick={handleSubmitProof} disabled={loading} glowColor="green" className="w-full">
-                Submit to Verifier
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </GlowButton>
-              <p className="text-xs text-center text-muted-foreground">
-                Creates a transaction to verify your proof on Solana
-              </p>
-            </div>
-          )}
-
-          {/* Submit Loading */}
-          {step === 'verify' && loading && (
-            <div className="py-8">
-              <ProofLoading status="loading" progress={75} message="Submitting proof to Solana..." />
+              )}
             </div>
           )}
 
@@ -446,11 +586,46 @@ function DeveloperPageContent() {
                 <div className="w-20 h-20 rounded-full bg-accent/10 border border-accent/30 flex items-center justify-center mx-auto mb-4 shadow-neon-green">
                   <CheckCircle className="w-10 h-10 text-accent" />
                 </div>
-                <h3 className="text-2xl font-display font-bold text-accent text-glow-green mb-2">Verified On-Chain!</h3>
+                <h3 className="text-2xl font-display font-bold text-accent text-glow-green mb-2">
+                  Verified On-Chain!
+                </h3>
                 <p className="text-muted-foreground">
                   Your developer reputation has been verified and recorded on Solana
                 </p>
               </div>
+
+              {/* Privacy Status */}
+              {flowResult && (
+                <div
+                  className={`p-4 rounded-xl border ${
+                    flowResult.privacyUsed
+                      ? 'border-accent/30 bg-accent/5'
+                      : 'border-amber-500/30 bg-amber-500/5'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    {flowResult.privacyUsed ? (
+                      <>
+                        <EyeOff className="w-4 h-4 text-accent" />
+                        <span className="text-sm font-semibold text-accent">Maximum Privacy Active</span>
+                        <span className="text-xs px-2 py-0.5 bg-accent/20 text-accent rounded">
+                          {flowResult.privacyProvider}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="w-4 h-4 text-amber-500" />
+                        <span className="text-sm font-semibold text-amber-500">Standard Mode</span>
+                      </>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {flowResult.privacyUsed
+                      ? 'Your proof was submitted anonymously. No one can link this to your wallet.'
+                      : 'Proof submitted from your connected wallet (visible on-chain).'}
+                  </p>
+                </div>
+              )}
 
               {verificationResult.signature && (
                 <div className="p-4 rounded-xl bg-muted/50 border border-border/50">
@@ -466,6 +641,18 @@ function DeveloperPageContent() {
                     {verificationResult.signature.slice(0, 48)}...
                     <ExternalLink className="w-3 h-3 flex-shrink-0" />
                   </a>
+                </div>
+              )}
+
+              {/* Show Shield transaction */}
+              {flowResult?.shieldTx && (
+                <div className="p-4 rounded-xl bg-muted/50 border border-border/50">
+                  <p className="text-xs text-muted-foreground font-mono uppercase tracking-wider mb-2">
+                    Privacy Shield TX
+                  </p>
+                  <p className="font-mono text-xs text-accent break-all">
+                    {flowResult.shieldTx.slice(0, 48)}...
+                  </p>
                 </div>
               )}
 

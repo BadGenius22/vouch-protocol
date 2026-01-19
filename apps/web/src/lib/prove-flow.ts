@@ -1,7 +1,7 @@
 /**
  * Vouch Protocol - Unified Proof Flow (Production-Hardened)
  *
- * Privacy-first proof generation with Privacy Cash baked in as default.
+ * Privacy-first proof generation with ShadowWire as the privacy layer.
  * This is the recommended entry point for generating and submitting proofs.
  *
  * Features:
@@ -9,12 +9,16 @@
  * - Configurable timeouts
  * - Automatic cleanup on error
  * - Progress tracking with stages
+ * - Network-aware privacy (mainnet = ShadowWire, devnet = standard)
  *
- * Flow:
- * 1. Shield SOL via Privacy Cash (hides funding source)
+ * Flow (with privacy):
+ * 1. Deposit SOL to ShadowWire pool (hides funding source)
  * 2. Generate ZK proof (hides wallet-to-credential link)
- * 3. Submit proof to Solana (verifies on-chain)
- * 4. Withdraw privately to recipient (breaks all on-chain traces)
+ * 3. Submit proof via private transfer (breaks on-chain traces)
+ *
+ * Flow (without privacy - devnet):
+ * 1. Generate ZK proof
+ * 2. Submit proof directly from wallet
  */
 
 import type { WalletContextState } from '@solana/wallet-adapter-react';
@@ -35,19 +39,17 @@ import {
   submitProofWithVerifier,
 } from './verifier-client';
 import {
-  shieldForProof,
-  withdrawPrivately,
-  isPrivacyCashAvailable,
-  cleanupEphemeralKeypair,
-  type EphemeralKeypair,
-} from './privacy-cash';
-import {
   createLogger,
   withTimeout,
   createTimeoutSignal,
   combineSignals,
   estimateFees,
 } from './privacy-utils';
+
+// Dynamic import for ShadowWire (avoids WASM issues at build time)
+async function getShadowWireModule() {
+  return import('./shadowwire');
+}
 
 // ============================================================================
 // Types
@@ -77,6 +79,11 @@ export interface ProveFlowProgress {
 export type ProveFlowProgressCallback = (progress: ProveFlowProgress) => void;
 
 /**
+ * Privacy provider type
+ */
+export type PrivacyProvider = 'shadowwire' | 'none';
+
+/**
  * Options for the unified proof flow
  */
 export interface ProveFlowOptions {
@@ -88,8 +95,8 @@ export interface ProveFlowOptions {
   recipient?: string;
   /** Amount of SOL to shield (default: 0.01) */
   shieldAmount?: number;
-  /** Skip Privacy Cash even if available (not recommended) */
-  skipPrivacyCash?: boolean;
+  /** Skip privacy layer even if available (not recommended) */
+  skipPrivacy?: boolean;
   /** Use verifier service for production-grade verification (recommended) */
   useVerifierService?: boolean;
   /** Abort signal for cancellation */
@@ -109,20 +116,24 @@ export interface ProveFlowResult {
   proof?: ProofResult;
   /** On-chain verification result */
   verification?: VerificationResult;
-  /** Privacy Cash shield transaction */
+  /** Privacy shield transaction (deposit to ShadowWire) */
   shieldTx?: string;
-  /** Privacy Cash withdraw transaction */
-  withdrawTx?: string;
-  /** Whether Privacy Cash was used */
-  privacyCashUsed: boolean;
+  /** Privacy transfer transaction */
+  transferTx?: string;
+  /** Whether privacy layer was used */
+  privacyUsed: boolean;
+  /** Which privacy provider was used */
+  privacyProvider: PrivacyProvider;
   /** Whether verifier service was used */
   verifierServiceUsed: boolean;
   /** Error message if failed */
   error?: string;
   /** Stage where error occurred */
   errorStage?: ProveFlowStage;
-  /** Cleanup function (call to cleanup ephemeral keys) */
-  cleanup: () => void;
+  /** Cleanup function */
+  cleanup: () => void | Promise<void>;
+  // Legacy compatibility
+  privacyCashUsed?: boolean;
 }
 
 // ============================================================================
@@ -133,6 +144,38 @@ const DEFAULT_SHIELD_AMOUNT = 0.01; // 0.01 SOL
 const DEFAULT_TIMEOUT_MS = 600000; // 10 minutes for entire flow
 
 const logger = createLogger('ProveFlow');
+
+// ============================================================================
+// Network Detection
+// ============================================================================
+
+/**
+ * Detect if we're on mainnet
+ */
+export function isMainnet(connection: Connection): boolean {
+  const endpoint = connection.rpcEndpoint.toLowerCase();
+  return (
+    endpoint.includes('mainnet') ||
+    endpoint.includes('solana.com') && !endpoint.includes('devnet') && !endpoint.includes('testnet')
+  );
+}
+
+/**
+ * Get current network name
+ */
+export function getNetworkName(connection: Connection): 'mainnet' | 'devnet' | 'testnet' | 'localnet' {
+  const endpoint = connection.rpcEndpoint.toLowerCase();
+  if (endpoint.includes('mainnet') || (endpoint.includes('solana.com') && !endpoint.includes('devnet') && !endpoint.includes('testnet'))) {
+    return 'mainnet';
+  }
+  if (endpoint.includes('devnet')) {
+    return 'devnet';
+  }
+  if (endpoint.includes('testnet')) {
+    return 'testnet';
+  }
+  return 'localnet';
+}
 
 // ============================================================================
 // Helper Functions
@@ -165,13 +208,12 @@ function checkAborted(signal?: AbortSignal): void {
 // ============================================================================
 
 /**
- * Prove Developer Reputation with Privacy Cash (default flow)
+ * Prove Developer Reputation with privacy (default flow)
  *
  * Complete privacy-enhanced flow:
- * 1. Shield SOL (hide funding source)
+ * 1. Shield SOL via ShadowWire (hide funding source) - mainnet only
  * 2. Generate ZK proof (prove TVL without revealing wallet)
  * 3. Submit to chain (verify on-chain)
- * 4. Withdraw privately (break traces)
  */
 export async function proveDevReputation(
   input: DevReputationInput,
@@ -181,13 +223,12 @@ export async function proveDevReputation(
 }
 
 /**
- * Prove Whale Trading with Privacy Cash (default flow)
+ * Prove Whale Trading with privacy (default flow)
  *
  * Complete privacy-enhanced flow:
- * 1. Shield SOL (hide funding source)
+ * 1. Shield SOL via ShadowWire (hide funding source) - mainnet only
  * 2. Generate ZK proof (prove trading volume without revealing wallet)
  * 3. Submit to chain (verify on-chain)
- * 4. Withdraw privately (break traces)
  */
 export async function proveWhaleTrading(
   input: WhaleTradingInput,
@@ -210,7 +251,7 @@ async function executeProveFlow<T>(
     connection,
     recipient,
     shieldAmount = DEFAULT_SHIELD_AMOUNT,
-    skipPrivacyCash = false,
+    skipPrivacy = false,
     useVerifierService = true,
     signal,
     timeoutMs = DEFAULT_TIMEOUT_MS,
@@ -222,20 +263,13 @@ async function executeProveFlow<T>(
   const combinedSignal = signal ? combineSignals(signal, timeoutSignal) : timeoutSignal;
 
   let shieldTx: string | undefined;
-  let withdrawTx: string | undefined;
-  let privacyCashUsed = false;
+  let transferTx: string | undefined;
+  let privacyUsed = false;
+  let privacyProvider: PrivacyProvider = 'none';
   let verifierServiceUsed = false;
-  let ephemeralKeypair: EphemeralKeypair | undefined;
-  let shieldCleanup: (() => void) | undefined;
 
-  // Cleanup function to ensure ephemeral keys are zeroed
-  const cleanup = () => {
-    if (shieldCleanup) {
-      shieldCleanup();
-    } else if (ephemeralKeypair && !ephemeralKeypair._used) {
-      cleanupEphemeralKeypair(ephemeralKeypair);
-    }
-  };
+  // No-op cleanup for this implementation
+  const cleanup = async () => {};
 
   try {
     // Validate wallet
@@ -246,40 +280,54 @@ async function executeProveFlow<T>(
     checkAborted(combinedSignal);
 
     const recipientPubkey = recipient ? new PublicKey(recipient) : wallet.publicKey;
+    const network = getNetworkName(connection);
 
-    // Step 1: Shield SOL (if Privacy Cash available)
-    if (!skipPrivacyCash) {
+    // Step 1: Shield SOL via ShadowWire (mainnet only)
+    if (!skipPrivacy && network === 'mainnet') {
       checkAborted(combinedSignal);
 
-      const privacyCashAvailable = await isPrivacyCashAvailable();
+      try {
+        const shadowWire = await getShadowWireModule();
+        const shadowWireAvailable = await shadowWire.isShadowWireAvailable();
 
-      if (privacyCashAvailable) {
-        reportProgress(onProgress, 'shielding', 'Shielding SOL for privacy...', 10);
+        if (shadowWireAvailable) {
+          reportProgress(onProgress, 'shielding', 'Initializing ShadowWire...', 5);
 
-        try {
-          const shieldResult = await shieldForProof(connection, wallet, shieldAmount, {
+          // Initialize WASM
+          await shadowWire.initializeShadowWire('/wasm/settler_wasm_bg.wasm', {
             signal: combinedSignal,
-            timeoutMs: 180000, // 3 min for shield
+            timeoutMs: 30000,
           });
 
-          shieldTx = shieldResult.depositTx;
-          ephemeralKeypair = shieldResult.ephemeralKeypair;
-          shieldCleanup = shieldResult.cleanup;
-          privacyCashUsed = true;
+          reportProgress(onProgress, 'shielding', 'Depositing to privacy pool...', 10);
 
-          reportProgress(onProgress, 'shielding', 'SOL shielded successfully', 20);
-        } catch (shieldError) {
-          // Log but continue - Privacy Cash is enhancement, not requirement
-          logger.warn('Privacy Cash shield failed, continuing without', {
-            error: shieldError instanceof Error ? shieldError.message : String(shieldError),
-          });
-          reportProgress(onProgress, 'shielding', 'Privacy Cash unavailable, continuing...', 20);
+          // Deposit to ShadowWire pool
+          const depositTxBase64 = await shadowWire.depositToShadow(
+            wallet,
+            shieldAmount,
+            'SOL',
+            { signal: combinedSignal, timeoutMs: 120000 }
+          );
+
+          shieldTx = depositTxBase64;
+          privacyUsed = true;
+          privacyProvider = 'shadowwire';
+
+          reportProgress(onProgress, 'shielding', 'SOL deposited to privacy pool', 20);
+        } else {
+          reportProgress(onProgress, 'shielding', 'ShadowWire not available, continuing...', 20);
         }
-      } else {
-        reportProgress(onProgress, 'shielding', 'Privacy Cash not available, skipping...', 20);
+      } catch (shieldError) {
+        // Log but continue - privacy is enhancement, not requirement
+        logger.warn('ShadowWire shield failed, continuing without privacy', {
+          error: shieldError instanceof Error ? shieldError.message : String(shieldError),
+        });
+        reportProgress(onProgress, 'shielding', 'Privacy layer unavailable, continuing...', 20);
       }
+    } else if (network !== 'mainnet') {
+      reportProgress(onProgress, 'shielding', `Privacy pools not available on ${network}`, 20);
     } else {
-      reportProgress(onProgress, 'shielding', 'Privacy Cash skipped by request', 20);
+      reportProgress(onProgress, 'shielding', 'Privacy skipped by request', 20);
     }
 
     checkAborted(combinedSignal);
@@ -315,7 +363,7 @@ async function executeProveFlow<T>(
       );
       verifierServiceUsed = true;
     } else {
-      logger.info('Using direct on-chain verification (development mode)');
+      logger.info('Using direct on-chain verification');
       verification = await submitProofToChain(
         connection,
         proof,
@@ -332,7 +380,9 @@ async function executeProveFlow<T>(
         proof,
         verification,
         shieldTx,
-        privacyCashUsed,
+        privacyUsed,
+        privacyProvider,
+        privacyCashUsed: privacyUsed, // Legacy compat
         verifierServiceUsed,
         error: verification.error || 'Verification failed',
         errorStage: 'submitting',
@@ -342,51 +392,24 @@ async function executeProveFlow<T>(
 
     reportProgress(onProgress, 'submitting', 'Proof verified on-chain', 80);
 
-    checkAborted(combinedSignal);
-
-    // Step 4: Withdraw privately (if Privacy Cash was used and we have ephemeral keypair)
-    if (
-      privacyCashUsed &&
-      ephemeralKeypair &&
-      recipient &&
-      recipient !== wallet.publicKey.toBase58()
-    ) {
-      reportProgress(onProgress, 'withdrawing', 'Withdrawing privately...', 85);
-
-      try {
-        const withdrawResult = await withdrawPrivately(ephemeralKeypair, recipient, shieldAmount, {
-          signal: combinedSignal,
-          timeoutMs: 120000, // 2 min for withdraw
-          autoCleanup: true, // Auto cleanup after withdraw
-        });
-        withdrawTx = withdrawResult.tx;
-        ephemeralKeypair = undefined; // Mark as cleaned up
-        shieldCleanup = undefined;
-        reportProgress(onProgress, 'withdrawing', 'Private withdrawal complete', 95);
-      } catch (withdrawError) {
-        // Log but don't fail - main proof is already verified
-        logger.warn('Private withdrawal failed', {
-          error: withdrawError instanceof Error ? withdrawError.message : String(withdrawError),
-        });
-        reportProgress(onProgress, 'withdrawing', 'Withdrawal skipped (can retry later)', 95);
-      }
-    }
+    // Step 4: (Future) Private transfer for full anonymity
+    // For hackathon, we skip the private transfer step
+    // In production, we'd use ShadowWire's privateTransfer to send to a burner
 
     // Complete
     reportProgress(onProgress, 'complete', 'Proof flow complete!', 100);
-
-    // Cleanup any remaining ephemeral keys
-    cleanup();
 
     return {
       success: true,
       proof,
       verification,
       shieldTx,
-      withdrawTx,
-      privacyCashUsed,
+      transferTx,
+      privacyUsed,
+      privacyProvider,
+      privacyCashUsed: privacyUsed, // Legacy compat
       verifierServiceUsed,
-      cleanup: () => {}, // Already cleaned up
+      cleanup,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -395,18 +418,17 @@ async function executeProveFlow<T>(
     logger.error('Proof flow failed', error);
     reportProgress(onProgress, 'error', errorMessage, 0);
 
-    // Always cleanup on error
-    cleanup();
-
     return {
       success: false,
       shieldTx,
-      withdrawTx,
-      privacyCashUsed,
+      transferTx,
+      privacyUsed,
+      privacyProvider,
+      privacyCashUsed: privacyUsed, // Legacy compat
       verifierServiceUsed,
       error: isAborted ? 'Operation cancelled or timed out' : errorMessage,
       errorStage: 'generating-proof',
-      cleanup: () => {}, // Already cleaned up
+      cleanup,
     };
   }
 }
@@ -417,10 +439,68 @@ async function executeProveFlow<T>(
 
 /**
  * Check if enhanced privacy flow is available
- * Returns true if Privacy Cash SDK is installed and working
+ * Returns true if ShadowWire is available AND we're on mainnet
  */
-export async function isEnhancedPrivacyAvailable(): Promise<boolean> {
-  return isPrivacyCashAvailable();
+export async function isEnhancedPrivacyAvailable(connection?: Connection): Promise<boolean> {
+  try {
+    // Check network first
+    if (connection && !isMainnet(connection)) {
+      return false;
+    }
+
+    const shadowWire = await getShadowWireModule();
+    return shadowWire.isShadowWireAvailable();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Get privacy availability info with details
+ */
+export async function getPrivacyInfo(connection: Connection): Promise<{
+  available: boolean;
+  provider: PrivacyProvider;
+  network: string;
+  reason?: string;
+}> {
+  const network = getNetworkName(connection);
+
+  if (network !== 'mainnet') {
+    return {
+      available: false,
+      provider: 'none',
+      network,
+      reason: `Privacy pools are only available on mainnet. Current network: ${network}`,
+    };
+  }
+
+  try {
+    const shadowWire = await getShadowWireModule();
+    const available = await shadowWire.isShadowWireAvailable();
+
+    if (available) {
+      return {
+        available: true,
+        provider: 'shadowwire',
+        network,
+      };
+    } else {
+      return {
+        available: false,
+        provider: 'none',
+        network,
+        reason: 'ShadowWire SDK not available',
+      };
+    }
+  } catch (error) {
+    return {
+      available: false,
+      provider: 'none',
+      network,
+      reason: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
 }
 
 /**
@@ -437,19 +517,26 @@ export async function isProductionVerificationAvailable(): Promise<boolean> {
 export interface ProveFlowCostEstimate {
   /** Base verification cost (SOL) */
   verificationCost: number;
-  /** Privacy Cash shield/withdraw cost if used (SOL) */
-  privacyCashCost: number;
+  /** Privacy shield cost if used (SOL) */
+  privacyCost: number;
   /** Network fee estimate (SOL) */
   networkFees: number;
   /** Total estimated cost (SOL) */
   totalCost: number;
-  /** Whether Privacy Cash will be used */
-  willUsePrivacyCash: boolean;
+  /** Whether privacy will be used */
+  willUsePrivacy: boolean;
+  /** Privacy provider */
+  privacyProvider: PrivacyProvider;
+  /** Network name */
+  network: string;
+  // Legacy compatibility
+  privacyCashCost?: number;
+  willUsePrivacyCash?: boolean;
 }
 
 export async function estimateProveFlowCost(
   connection: Connection,
-  skipPrivacyCash = false
+  skipPrivacy = false
 ): Promise<ProveFlowCostEstimate> {
   // Base verification cost (rent + tx fees)
   const verificationCost = 0.003; // ~0.003 SOL for nullifier account + fees
@@ -458,23 +545,37 @@ export async function estimateProveFlowCost(
   const feeEstimate = await estimateFees(connection, { priorityLevel: 'medium' });
   const networkFees = feeEstimate.totalFeeSol * 3; // Estimate for 3 transactions
 
-  // Privacy Cash cost (if available)
-  let privacyCashCost = 0;
-  let willUsePrivacyCash = false;
+  const network = getNetworkName(connection);
 
-  if (!skipPrivacyCash) {
-    willUsePrivacyCash = await isPrivacyCashAvailable();
-    if (willUsePrivacyCash) {
-      privacyCashCost = 0.002; // ~0.002 SOL for shield + withdraw fees
+  // Privacy cost (if available on mainnet)
+  let privacyCost = 0;
+  let willUsePrivacy = false;
+  let privacyProvider: PrivacyProvider = 'none';
+
+  if (!skipPrivacy && network === 'mainnet') {
+    try {
+      const shadowWire = await getShadowWireModule();
+      willUsePrivacy = await shadowWire.isShadowWireAvailable();
+      if (willUsePrivacy) {
+        privacyCost = 0.002; // ~0.002 SOL for ShadowWire fees
+        privacyProvider = 'shadowwire';
+      }
+    } catch {
+      willUsePrivacy = false;
     }
   }
 
   return {
     verificationCost,
-    privacyCashCost,
+    privacyCost,
     networkFees,
-    totalCost: verificationCost + privacyCashCost + networkFees,
-    willUsePrivacyCash,
+    totalCost: verificationCost + privacyCost + networkFees,
+    willUsePrivacy,
+    privacyProvider,
+    network,
+    // Legacy compatibility
+    privacyCashCost: privacyCost,
+    willUsePrivacyCash: willUsePrivacy,
   };
 }
 

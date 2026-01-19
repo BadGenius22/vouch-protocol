@@ -134,7 +134,30 @@ function setCache<T>(key: string, data: T): void {
 
 let heliusClient: Helius | null = null;
 
+/**
+ * Check if we should use mock data
+ * - Always use mock on devnet/testnet (no real value)
+ * - Use mock if HELIUS_API_KEY is not set
+ * - Can be forced with USE_MOCK_DATA=true
+ */
+function shouldUseMockData(): boolean {
+  // Force mock data via env var
+  if (process.env.USE_MOCK_DATA === 'true') return true;
+
+  // Always use mock on non-mainnet (devnet has no real TVL/volume)
+  const network = process.env.NEXT_PUBLIC_SOLANA_NETWORK || 'devnet';
+  if (network !== 'mainnet-beta') return true;
+
+  // Use mock if no API key
+  if (!process.env.HELIUS_API_KEY) return true;
+
+  return false;
+}
+
 function getHeliusClient(): Helius | null {
+  // Always return null (use mock) on non-mainnet
+  if (shouldUseMockData()) return null;
+
   const apiKey = process.env.HELIUS_API_KEY;
   if (!apiKey) return null;
 
@@ -261,7 +284,8 @@ export async function getDeployedPrograms(walletAddress: string): Promise<{
 
     const helius = getHeliusClient();
     if (!helius) {
-      debugWarn('HELIUS_API_KEY not set - using mock data');
+      const network = process.env.NEXT_PUBLIC_SOLANA_NETWORK || 'devnet';
+      debugLog(`Using mock data (network: ${network})`);
       return { success: true, data: getMockProgramData(walletAddress) };
     }
 
@@ -385,7 +409,8 @@ export async function getTradingVolume(
 
     const helius = getHeliusClient();
     if (!helius) {
-      debugWarn('HELIUS_API_KEY not set - using mock data');
+      const network = process.env.NEXT_PUBLIC_SOLANA_NETWORK || 'devnet';
+      debugLog(`Using mock data (network: ${network})`);
       return { success: true, data: getMockTradingData(walletAddress, daysBack) };
     }
 
