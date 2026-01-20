@@ -696,6 +696,64 @@ export type VouchVerifier = {
       ]
     },
     {
+      "name": "fixConfigLayout",
+      "docs": [
+        "Fix config layout after broken migration",
+        "This is a one-time fix for the max_epoch_age migration that didn't shift existing fields.",
+        "The previous migration wrote max_epoch_age at offset 89 but didn't move total_proofs_verified",
+        "and bump to their new positions (97-104 and 105 respectively)."
+      ],
+      "discriminator": [
+        157,
+        216,
+        246,
+        222,
+        227,
+        73,
+        187,
+        24
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "docs": [
+            "We use UncheckedAccount because the old account format (98 bytes)",
+            "cannot be deserialized as ConfigAccount (106 bytes)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "docs": [
+            "Admin must be the one stored in the config account",
+            "We verify this manually in the instruction handler"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "fundAirdropCampaign",
       "docs": [
         "Fund an airdrop campaign's token vault",
@@ -1238,6 +1296,69 @@ export type VouchVerifier = {
         {
           "name": "txSignature",
           "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "migrateConfig",
+      "docs": [
+        "Migrate config account to add max_epoch_age field",
+        "Only admin can call this. This is a one-time migration for v2.",
+        "Uses raw account manipulation to bypass Anchor's deserialization which fails",
+        "when the account size doesn't match the new struct definition."
+      ],
+      "discriminator": [
+        92,
+        131,
+        58,
+        105,
+        210,
+        154,
+        224,
+        193
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "docs": [
+            "We use UncheckedAccount because the old account format (98 bytes)",
+            "cannot be deserialized as ConfigAccount (106 bytes)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "docs": [
+            "Admin must be the one stored in the config account",
+            "We verify this manually in the instruction handler"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "maxEpochAge",
+          "type": "u64"
         }
       ]
     },

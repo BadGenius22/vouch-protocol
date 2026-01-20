@@ -49,6 +49,8 @@ describe('proof utilities', () => {
         publicInputs: ['input1', 'input2'],
         nullifier: 'nullifier123',
         commitment: 'commitment456',
+        epoch: '20000',
+        dataHash: 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
         generatedAt: mockNow,
         expiresAt: mockNow + 300000,
       };
@@ -69,6 +71,8 @@ describe('proof utilities', () => {
         publicInputs: [],
         nullifier: '',
         commitment: '',
+        epoch: '20000',
+        dataHash: 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
         generatedAt: mockNow,
         expiresAt: mockNow + 300000,
       };
@@ -85,6 +89,8 @@ describe('proof utilities', () => {
         publicInputs: [],
         nullifier: '',
         commitment: '',
+        epoch: '20000',
+        dataHash: 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
         generatedAt: mockNow,
         expiresAt: mockNow + 300000,
       };
@@ -100,6 +106,8 @@ describe('proof utilities', () => {
         publicInputs: [],
         nullifier: '',
         commitment: '',
+        epoch: '20000',
+        dataHash: 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
         generatedAt: mockNow,
         expiresAt: mockNow + 300000,
       };
@@ -117,6 +125,8 @@ describe('proof utilities', () => {
         publicInputs: ['input1', 'input2'],
         nullifier: 'nullifier123',
         commitment: 'commitment456',
+        epoch: '20000',
+        dataHash: 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
         generatedAt: mockNow,
         expiresAt: mockNow + 300000,
       };
@@ -157,6 +167,8 @@ describe('proof utilities', () => {
         publicInputs: [],
         nullifier: '',
         commitment: '',
+        epoch: '20000',
+        dataHash: 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
         generatedAt: mockNow,
         expiresAt: mockNow + 300000,
       };
@@ -180,6 +192,8 @@ describe('proof utilities', () => {
         publicInputs: [],
         nullifier: '',
         commitment: '',
+        epoch: '20000',
+        dataHash: 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
         generatedAt: mockNow,
         expiresAt: mockNow + 300000,
       };
@@ -196,6 +210,8 @@ describe('proof utilities', () => {
         publicInputs: ['test'],
         nullifier: 'abc',
         commitment: 'def',
+        epoch: '20000',
+        dataHash: 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
         generatedAt: mockNow,
         expiresAt: mockNow + 300000,
       };
@@ -214,6 +230,8 @@ describe('proof utilities', () => {
         publicInputs: ['input1', 'input2', 'input3'],
         nullifier: 'abcdef1234567890',
         commitment: 'fedcba0987654321',
+        epoch: '20000',
+        dataHash: 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
         generatedAt: mockNow,
         expiresAt: mockNow + 300000,
       };
@@ -225,6 +243,8 @@ describe('proof utilities', () => {
       expect(deserialized.publicInputs).toEqual(original.publicInputs);
       expect(deserialized.nullifier).toBe(original.nullifier);
       expect(deserialized.commitment).toBe(original.commitment);
+      expect(deserialized.epoch).toBe(original.epoch);
+      expect(deserialized.dataHash).toBe(original.dataHash);
       expect(deserialized.generatedAt).toBe(original.generatedAt);
       expect(deserialized.expiresAt).toBe(original.expiresAt);
     });
@@ -240,6 +260,8 @@ describe('proof utilities', () => {
         publicInputs: [],
         nullifier: '',
         commitment: '',
+        epoch: '20000',
+        dataHash: 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
         generatedAt: mockNow,
         expiresAt: mockNow + 300000,
       };

@@ -142,6 +142,124 @@ pub mod vouch_verifier {
         Ok(())
     }
 
+    /// Migrate config account to add max_epoch_age field
+    /// Only admin can call this. This is a one-time migration for v2.
+    /// Uses raw account manipulation to bypass Anchor's deserialization which fails
+    /// when the account size doesn't match the new struct definition.
+    pub fn migrate_config(ctx: Context<MigrateConfig>, max_epoch_age: u64) -> Result<()> {
+        let config_info = &ctx.accounts.config;
+        let admin = &ctx.accounts.admin;
+
+        // Verify admin from raw account data
+        // Admin pubkey is stored at offset 8 (after discriminator), 32 bytes
+        {
+            let data = config_info.try_borrow_data()?;
+            require!(data.len() >= 40, VouchError::InvalidCommitment); // Need at least discriminator + admin
+            let stored_admin = Pubkey::try_from(&data[8..40]).map_err(|_| VouchError::Unauthorized)?;
+            require!(stored_admin == admin.key(), VouchError::Unauthorized);
+        }
+
+        // Calculate new space: 8 (discriminator) + ConfigAccount size
+        let new_space = 8 + ConfigAccount::INIT_SPACE;
+        let current_space = config_info.data_len();
+
+        msg!("Migrating config: current size = {}, new size = {}", current_space, new_space);
+
+        // If already at correct size, just update max_epoch_age
+        if current_space >= new_space {
+            msg!("Config already at correct size, updating max_epoch_age");
+            let mut data = config_info.try_borrow_mut_data()?;
+            // max_epoch_age is at offset: 8 (discriminator) + 32 (admin) + 32 (pause_authority) + 4 (verifier_count) + 1 (is_paused) + 4 (max_proofs_per_day) + 8 (cooldown_seconds) = 89
+            let offset = 89;
+            data[offset..offset + 8].copy_from_slice(&max_epoch_age.to_le_bytes());
+            msg!("Config migrated: max_epoch_age set to {}", max_epoch_age);
+            return Ok(());
+        }
+
+        // Reallocate the account
+        let rent = Rent::get()?;
+        let new_minimum_balance = rent.minimum_balance(new_space);
+        let lamports_diff = new_minimum_balance.saturating_sub(config_info.lamports());
+
+        if lamports_diff > 0 {
+            // Transfer lamports from admin to config account
+            let transfer_ix = anchor_lang::solana_program::system_instruction::transfer(
+                admin.key,
+                config_info.key,
+                lamports_diff,
+            );
+            anchor_lang::solana_program::program::invoke(
+                &transfer_ix,
+                &[
+                    admin.to_account_info(),
+                    config_info.to_account_info(),
+                    ctx.accounts.system_program.to_account_info(),
+                ],
+            )?;
+        }
+
+        // Reallocate
+        config_info.realloc(new_space, false)?;
+
+        // Write max_epoch_age at the correct offset
+        let mut data = config_info.try_borrow_mut_data()?;
+        let offset = 89; // After admin(32) + pause_authority(32) + verifier_count(4) + is_paused(1) + max_proofs_per_day(4) + cooldown_seconds(8) + discriminator(8)
+        data[offset..offset + 8].copy_from_slice(&max_epoch_age.to_le_bytes());
+
+        msg!("Config migrated: max_epoch_age set to {}", max_epoch_age);
+
+        Ok(())
+    }
+
+    /// Fix config layout after broken migration
+    /// This is a one-time fix for the max_epoch_age migration that didn't shift existing fields.
+    /// The previous migration wrote max_epoch_age at offset 89 but didn't move total_proofs_verified
+    /// and bump to their new positions (97-104 and 105 respectively).
+    pub fn fix_config_layout(ctx: Context<MigrateConfig>) -> Result<()> {
+        let config_info = &ctx.accounts.config;
+        let admin = &ctx.accounts.admin;
+
+        // Verify admin from raw account data
+        {
+            let data = config_info.try_borrow_data()?;
+            require!(data.len() >= 40, VouchError::InvalidCommitment);
+            let stored_admin = Pubkey::try_from(&data[8..40]).map_err(|_| VouchError::Unauthorized)?;
+            require!(stored_admin == admin.key(), VouchError::Unauthorized);
+        }
+
+        // Verify account is at correct size (106 bytes)
+        require!(config_info.data_len() == 106, VouchError::InvalidCommitment);
+
+        // Compute correct bump
+        let (expected_pda, bump) = Pubkey::find_program_address(&[b"config"], &crate::ID);
+        require!(expected_pda == config_info.key(), VouchError::InvalidCommitment);
+
+        msg!("Fixing config layout: computed bump = {}", bump);
+
+        // Read current values for logging
+        {
+            let data = config_info.try_borrow_data()?;
+            msg!("Current value at offset 97 (old bump stuck there): {}", data[97]);
+            msg!("Current value at offset 105 (where bump should be): {}", data[105]);
+        }
+
+        // Fix the layout:
+        // - Offset 89-96: max_epoch_age (keep as is - was written by migrate_config)
+        // - Offset 97-104: total_proofs_verified (set to 0, was lost during migration)
+        // - Offset 105: bump (write the correct value)
+        {
+            let mut data = config_info.try_borrow_mut_data()?;
+            // Set total_proofs_verified to 0
+            data[97..105].copy_from_slice(&0u64.to_le_bytes());
+            // Set bump to correct value
+            data[105] = bump;
+        }
+
+        msg!("Config layout fixed: total_proofs_verified=0, bump={}", bump);
+
+        Ok(())
+    }
+
     // === Rate Limiting ===
 
     /// Initialize rate limit tracking for a wallet
@@ -956,6 +1074,29 @@ pub struct AdminControl<'info> {
 
     #[account(mut)]
     pub admin: Signer<'info>,
+}
+
+/// Migrate config account to new size (adds max_epoch_age field)
+/// Uses UncheckedAccount to bypass Anchor's automatic deserialization
+/// which fails when the account size doesn't match the expected struct size.
+#[derive(Accounts)]
+pub struct MigrateConfig<'info> {
+    /// CHECK: Manual verification - this is the config PDA being migrated.
+    /// We use UncheckedAccount because the old account format (98 bytes)
+    /// cannot be deserialized as ConfigAccount (106 bytes).
+    #[account(
+        mut,
+        seeds = [b"config"],
+        bump
+    )]
+    pub config: UncheckedAccount<'info>,
+
+    /// Admin must be the one stored in the config account
+    /// We verify this manually in the instruction handler
+    #[account(mut)]
+    pub admin: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
 }
 
 /// Initialize rate limit tracking for a wallet

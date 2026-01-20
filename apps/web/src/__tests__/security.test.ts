@@ -316,6 +316,8 @@ describe('security utilities', () => {
       publicInputs: ['input1', 'input2'],
       nullifier: 'deadbeef',
       commitment: 'cafebabe',
+      epoch: '20000',
+      dataHash: 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
       generatedAt: mockNow,
       expiresAt: mockNow + 300000,
     });
@@ -356,6 +358,8 @@ describe('security utilities', () => {
       publicInputs: ['input1', 'input2'],
       nullifier: 'deadbeef',
       commitment: 'cafebabe',
+      epoch: '20000',
+      dataHash: 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
       generatedAt: mockNow,
       expiresAt: mockNow + 300000,
     });

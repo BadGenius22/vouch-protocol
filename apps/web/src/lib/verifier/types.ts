@@ -14,6 +14,8 @@ export const verifyRequestSchema = z.object({
   proofType: z.enum(['developer', 'whale']),
   nullifier: z.string().length(64, 'Nullifier must be 64 hex characters'),
   commitment: z.string().length(64, 'Commitment must be 64 hex characters'),
+  epoch: z.string().regex(/^\d+$/, 'Epoch must be a numeric string'),
+  dataHash: z.string().length(64, 'Data hash must be 64 hex characters'),
 });
 
 export type VerifyRequest = z.infer<typeof verifyRequestSchema>;
@@ -26,6 +28,8 @@ export interface VerificationResult {
   proofType: ProofType;
   nullifier: string;
   commitment: string;
+  epoch: string;
+  dataHash: string;
   verifiedAt: number;
 }
 

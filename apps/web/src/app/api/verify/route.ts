@@ -33,16 +33,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(response, { status: 400 });
     }
 
-    const { proof, publicInputs, proofType, nullifier, commitment } = parseResult.data;
+    const { proof, publicInputs, proofType, nullifier, commitment, epoch, dataHash } = parseResult.data;
 
     console.log(`[API/verify] Verifying ${proofType} proof...`);
     console.log(`[API/verify] Nullifier: ${nullifier.slice(0, 16)}...`);
+    console.log(`[API/verify] Epoch: ${epoch}`);
     console.log(`[API/verify] Proof size: ${proof.length} chars`);
 
     // Verify the proof
     let result;
     try {
-      result = await verifyProof(proof, publicInputs, proofType, nullifier, commitment);
+      result = await verifyProof(proof, publicInputs, proofType, nullifier, commitment, epoch, dataHash);
     } catch (verifyError) {
       console.error('[API/verify] verifyProof threw:', verifyError);
       const response: VerifyResponse = {

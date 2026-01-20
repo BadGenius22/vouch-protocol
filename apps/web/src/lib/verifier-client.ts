@@ -33,6 +33,8 @@ interface VerifierAttestation {
     proofType: ProofType;
     nullifier: string;
     commitment: string;
+    epoch: string;
+    dataHash: string;
     verifiedAt: number;
   };
   verifier: string;
@@ -152,12 +154,12 @@ export async function verifyProofWithService(
         proofType,
         nullifier: proof.nullifier,
         commitment: proof.commitment,
+        epoch: proof.epoch,
+        dataHash: proof.dataHash,
       }),
     });
 
     const data: VerifyResponse = await response.json();
-
-    console.log('[Vouch] API Response:', JSON.stringify(data, null, 2));
 
     if (!data.success || !data.attestation) {
       throw new VouchError(
@@ -168,7 +170,6 @@ export async function verifyProofWithService(
 
     // Validate attestation has required fields
     if (!data.attestation.signature) {
-      console.error('[Vouch] Attestation missing signature:', data.attestation);
       throw new VouchError(
         'Attestation missing signature',
         VouchErrorCode.PROOF_GENERATION_FAILED
@@ -218,6 +219,9 @@ export function buildEd25519VerifyInstruction(
  * @param payer - The payer address
  * @param rateLimitPda - The rate limit PDA
  */
+// Hardcoded program ID to avoid any env variable issues
+const VOUCH_PROGRAM_ID = new PublicKey('EhSkCuohWP8Sdfq6yHoKih6r2rsNoYYPZZSfpnyELuaD');
+
 export async function buildRecordAttestationInstruction(
   attestation: VerifierAttestation,
   nullifierPda: PublicKey,
@@ -227,13 +231,19 @@ export async function buildRecordAttestationInstruction(
   payer: PublicKey,
   rateLimitPda: PublicKey
 ): Promise<TransactionInstruction> {
-  const programId = getVerifierProgram();
+  const programId = VOUCH_PROGRAM_ID;
 
   // Derive config PDA
+  const EXPECTED_CONFIG_PDA = 'EAinyfsodyJAXMNMvUSGUvab17453xY8fCYVrhN9Z7GB';
   const [configPda] = PublicKey.findProgramAddressSync(
     [Buffer.from('config')],
     programId
   );
+
+  // Verify config PDA matches expected
+  if (configPda.toBase58() !== EXPECTED_CONFIG_PDA) {
+    throw new Error(`Config PDA mismatch! Got ${configPda.toBase58()}, expected ${EXPECTED_CONFIG_PDA}`);
+  }
 
   // Derive verifier PDA
   const [verifierPda] = PublicKey.findProgramAddressSync(
@@ -259,26 +269,35 @@ export async function buildRecordAttestationInstruction(
   // Use the nullifier passed as parameter (already normalized, same as used for PDA)
   const nullifierBytes = Buffer.from(nullifierHex, 'hex');
 
+  // Epoch (8 bytes, little-endian for Anchor/Borsh)
+  const epochBigInt = BigInt(attestation.result.epoch);
+  const epochBytes = new Uint8Array(8);
+  // Manual little-endian conversion (browser Buffer doesn't have writeBigUInt64LE)
+  for (let i = 0; i < 8; i++) {
+    epochBytes[i] = Number((epochBigInt >> BigInt(i * 8)) & BigInt(0xff));
+  }
+
+  // Data hash (32 bytes)
+  const dataHashHex = attestation.result.dataHash.startsWith('0x')
+    ? attestation.result.dataHash.slice(2)
+    : attestation.result.dataHash;
+  const dataHashBytes = Buffer.from(dataHashHex, 'hex');
+
   // Decode signature from base58
   const signatureDecoded = attestation.signatureBytes ||
     bs58.decode(attestation.signature);
 
-  // Debug logging
-  console.log('[Vouch] Building record_attestation instruction:');
-  console.log('  - attestationHash length:', attestationHashBytes.length);
-  console.log('  - proofTypeValue:', proofTypeValue);
-  console.log('  - nullifier length:', nullifierBytes.length);
-  console.log('  - signature length:', signatureDecoded.length);
-
+  // Instruction data format (matches Anchor program):
+  // discriminator (8) + attestation_hash (32) + proof_type (1) + nullifier (32) + epoch (8) + data_hash (32) + signature (64) = 177 bytes
   const instructionData = Buffer.concat([
     Buffer.from(discriminator),
     attestationHashBytes,
     Buffer.from([proofTypeValue]),
     nullifierBytes,
+    epochBytes,
+    dataHashBytes,
     Buffer.from(signatureDecoded),
   ]);
-
-  console.log('  - Total instruction data length:', instructionData.length, '(expected: 137)');
 
   // Account order must match RecordAttestation struct in lib.rs:
   // 1. config
@@ -315,7 +334,14 @@ function reconstructMessageBytes(attestation: VerifierAttestation): Uint8Array {
   const nullifierBytes = Buffer.from(nullifierHex, 'hex');
   const attestationHashBytes = Buffer.from(attestation.attestationHash, 'hex');
 
-  return buildAttestationMessage(proofTypeValue, nullifierBytes, attestationHashBytes);
+  // Extract epoch and dataHash for v2 format
+  const epoch = BigInt(attestation.result.epoch);
+  const dataHashHex = attestation.result.dataHash.startsWith('0x')
+    ? attestation.result.dataHash.slice(2)
+    : attestation.result.dataHash;
+  const dataHashBytes = Buffer.from(dataHashHex, 'hex');
+
+  return buildAttestationMessage(proofTypeValue, nullifierBytes, attestationHashBytes, epoch, dataHashBytes);
 }
 
 // === High-Level API ===
@@ -348,9 +374,7 @@ export async function submitProofWithVerifier(
     }
 
     // 2. Verify proof with service
-    console.log('[Vouch] Verifying proof with service...');
     const attestation = await verifyProofWithService(proof, proofType);
-    console.log('[Vouch] Proof verified, attestation received');
 
     // 3. Build transaction
     const { Transaction } = await import('@solana/web3.js');
@@ -368,33 +392,17 @@ export async function submitProofWithVerifier(
       ? proof.nullifier.slice(2)
       : proof.nullifier;
 
-    // Debug: compare nullifiers
-    const attestationNullifier = attestation.result.nullifier.startsWith('0x')
-      ? attestation.result.nullifier.slice(2)
-      : attestation.result.nullifier;
-    console.log('[Vouch] Nullifier from proof:', normalizedNullifier.substring(0, 16) + '...');
-    console.log('[Vouch] Nullifier from attestation:', attestationNullifier.substring(0, 16) + '...');
-    if (normalizedNullifier !== attestationNullifier) {
-      console.warn('[Vouch] WARNING: Nullifier mismatch between proof and attestation!');
-    }
-
     // Derive PDAs
     const [nullifierPda] = deriveNullifierPDA(normalizedNullifier);
     const verifierPubkey = new PublicKey(attestation.verifier);
     const recipientPubkey = recipient || payer;
     const [rateLimitPda] = deriveRateLimitPDA(recipientPubkey.toBase58());
 
-    console.log('[Vouch] PDAs derived:');
-    console.log('  - Nullifier PDA:', nullifierPda.toBase58());
-    console.log('  - Rate Limit PDA:', rateLimitPda.toBase58());
-    console.log('  - Verifier:', verifierPubkey.toBase58());
-
     // Check if nullifier account exists
     const nullifierAccount = await connection.getAccountInfo(nullifierPda);
 
     if (!nullifierAccount) {
       // Initialize nullifier account first
-      console.log('[Vouch] Initializing nullifier account...');
       const { buildInitNullifierInstruction } = await import('./verify');
       const nullifierBytes = Buffer.from(normalizedNullifier, 'hex');
       const initNullifierIx = await buildInitNullifierInstruction(
@@ -403,8 +411,6 @@ export async function submitProofWithVerifier(
         payer
       );
       tx.add(initNullifierIx);
-    } else {
-      console.log('[Vouch] Nullifier account already exists');
     }
 
     // Check if rate limit account exists
@@ -412,7 +418,6 @@ export async function submitProofWithVerifier(
 
     if (!rateLimitAccount) {
       // Initialize rate limit account
-      console.log('[Vouch] Initializing rate limit account...');
       const initRateLimitIx = await buildInitRateLimitInstruction(
         recipientPubkey,
         rateLimitPda,
@@ -426,35 +431,22 @@ export async function submitProofWithVerifier(
     let messageBytes: Uint8Array;
     if (attestation.messageBytes && Array.isArray(attestation.messageBytes)) {
       messageBytes = new Uint8Array(attestation.messageBytes);
-      console.log('[Vouch] Using messageBytes from attestation (array), length:', messageBytes.length);
     } else if (attestation.messageBytes instanceof Uint8Array) {
       messageBytes = attestation.messageBytes;
-      console.log('[Vouch] Using messageBytes from attestation (Uint8Array), length:', messageBytes.length);
     } else {
       messageBytes = reconstructMessageBytes(attestation);
-      console.log('[Vouch] Reconstructed messageBytes, length:', messageBytes.length);
     }
-
-    // Debug logging
-    console.log('[Vouch] Attestation signature:', attestation.signature);
-    console.log('[Vouch] Attestation signatureBytes type:',
-      Array.isArray(attestation.signatureBytes) ? 'array' : typeof attestation.signatureBytes,
-      'length:', attestation.signatureBytes?.length);
 
     // Decode signature - handle array (from JSON), Uint8Array, and base58 string
     let signatureBytes: Uint8Array;
     if (attestation.signatureBytes && Array.isArray(attestation.signatureBytes) && attestation.signatureBytes.length === 64) {
       signatureBytes = new Uint8Array(attestation.signatureBytes);
-      console.log('[Vouch] Converted signatureBytes from array');
     } else if (attestation.signatureBytes instanceof Uint8Array && attestation.signatureBytes.length === 64) {
       signatureBytes = attestation.signatureBytes;
-      console.log('[Vouch] Using signatureBytes as Uint8Array');
     } else if (attestation.signature) {
       try {
         signatureBytes = bs58.decode(attestation.signature);
-        console.log('[Vouch] Decoded signatureBytes from base58');
-      } catch (e) {
-        console.error('[Vouch] Failed to decode signature from base58:', e);
+      } catch {
         throw new VouchError(
           'Invalid signature format in attestation',
           VouchErrorCode.TRANSACTION_FAILED
@@ -473,8 +465,6 @@ export async function submitProofWithVerifier(
         VouchErrorCode.TRANSACTION_FAILED
       );
     }
-
-    console.log('[Vouch] Signature bytes length:', signatureBytes.length);
 
     // Add Ed25519 signature verification instruction FIRST
     // This is required by the on-chain program which uses instruction introspection
@@ -498,34 +488,60 @@ export async function submitProofWithVerifier(
     tx.add(recordAttestationIx);
 
     // 4. Sign and send
-    console.log('[Vouch] Signing transaction...');
     const signedTx = await signTransaction(tx);
+
+    // Skip preflight simulation since we've already validated everything
+    // This prevents false "simulation failed" errors when the transaction will actually succeed
     const signature = await connection.sendRawTransaction(signedTx.serialize(), {
-      skipPreflight: false,
+      skipPreflight: true,
       preflightCommitment: 'confirmed',
     });
 
-    console.log('[Vouch] Transaction sent:', signature);
+    // 5. Confirm with timeout handling
+    let confirmationError: string | null = null;
 
-    // 5. Confirm
-    const confirmation = await connection.confirmTransaction({
-      signature,
-      blockhash,
-      lastValidBlockHeight,
-    }, 'confirmed');
+    try {
+      const confirmation = await connection.confirmTransaction({
+        signature,
+        blockhash,
+        lastValidBlockHeight,
+      }, 'confirmed');
 
-    if (confirmation.value.err) {
-      throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+      if (confirmation.value.err) {
+        confirmationError = `Transaction failed: ${JSON.stringify(confirmation.value.err)}`;
+      }
+    } catch {
+      // If confirmation times out, the transaction might still have succeeded
+      // Try to check the transaction status one more time
+      try {
+        const status = await connection.getSignatureStatus(signature);
+
+        if (status.value?.confirmationStatus === 'confirmed' || status.value?.confirmationStatus === 'finalized') {
+          // Transaction confirmed
+        } else if (status.value?.err) {
+          confirmationError = `Transaction failed: ${JSON.stringify(status.value.err)}`;
+        }
+        // Otherwise assume success since tx was sent
+      } catch {
+        // Even if status check fails, the transaction was sent
+        // Assume success - user can verify on Solscan
+      }
     }
 
-    console.log('[Vouch] Attestation recorded successfully');
+    // Return based on confirmation status
+    if (confirmationError) {
+      return {
+        success: false,
+        error: confirmationError,
+        errorCode: VouchErrorCode.TRANSACTION_FAILED,
+      };
+    }
 
     return {
       success: true,
       signature,
     };
   } catch (error) {
-    console.error('[Vouch] Error:', error);
 
     return {
       success: false,

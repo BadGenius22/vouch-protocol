@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, memo } from 'react';
 import { useUnifiedWallet } from '@jup-ag/wallet-adapter';
 import { useWalletReady, useSolanaConnection } from '@/components/providers';
 import { Button } from '@/components/ui/button';
@@ -63,7 +63,7 @@ export default function WhalePage() {
   return <WhalePageContent />;
 }
 
-function WhalePageContent() {
+const WhalePageContent = memo(function WhalePageContent() {
   const wallet = useUnifiedWallet();
   const connection = useSolanaConnection();
 
@@ -117,6 +117,13 @@ function WhalePageContent() {
 
   // Check if wallet has already verified when connected
   useEffect(() => {
+    let isMounted = true;
+    const timeoutId = setTimeout(() => {
+      if (isMounted) {
+        setStep('connect');
+      }
+    }, 10000);
+
     async function checkExistingVerification() {
       if (!wallet.publicKey) {
         setStep('connect');
@@ -129,20 +136,27 @@ function WhalePageContent() {
       try {
         const { computeNullifierForWallet } = await import('@/lib/proof');
         const { isNullifierUsed, isProgramDeployed } = await import('@/lib/verify');
-        const { preloadCircuits } = await import('@/lib/circuit');
+
+        if (!isMounted) return;
 
         const nullifier = computeNullifierForWallet(wallet.publicKey.toBase58(), 'whale');
+        const deployed = await isProgramDeployed(connection);
 
-        const [deployed, used] = await Promise.all([
-          isProgramDeployed(connection),
-          isNullifierUsed(connection, nullifier),
-          preloadCircuits(),
-        ]);
+        if (!isMounted) return;
 
         if (!deployed) {
           setStep('connect');
           return;
         }
+
+        const used = await isNullifierUsed(connection, nullifier);
+
+        if (!isMounted) return;
+
+        // Preload circuits in background (don't block the UI)
+        import('@/lib/circuit').then(({ preloadCircuits }) => {
+          preloadCircuits().catch(() => {});
+        });
 
         if (used) {
           setExistingNullifier(nullifier);
@@ -150,22 +164,37 @@ function WhalePageContent() {
         } else {
           setStep('connect');
         }
-      } catch (err) {
-        console.error('Error checking existing verification:', err);
-        setStep('connect');
+      } catch {
+        if (isMounted) {
+          setStep('connect');
+        }
       }
     }
 
     checkExistingVerification();
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timeoutId);
+    };
   }, [wallet.publicKey, connection]);
 
   const getCompletedSteps = (): string[] => {
     const stepOrder = ['connect', 'fetch', 'ready', 'proving', 'complete'];
     if (step === 'checking') return [];
     if (step === 'already-verified') return stepOrder;
+
+    // If wallet is connected and we're at 'connect' step, 'connect' is completed
+    if (step === 'connect' && wallet.publicKey) {
+      return ['connect'];
+    }
+
     const currentIndex = stepOrder.indexOf(step);
     return currentIndex >= 0 ? stepOrder.slice(0, currentIndex) : [];
   };
+
+  // Visual step for the indicator - when wallet is connected at 'connect' step, show 'fetch' as current
+  const visualStep = step === 'connect' && wallet.publicKey ? 'fetch' : step;
 
   const handleFetchData = useCallback(async () => {
     if (!wallet.publicKey) return;
@@ -300,7 +329,7 @@ function WhalePageContent() {
 
         {/* Step Indicator */}
         <div className="mb-8">
-          <StepIndicator steps={STEPS} currentStep={step} completedSteps={getCompletedSteps()} />
+          <StepIndicator steps={STEPS} currentStep={visualStep} completedSteps={getCompletedSteps()} />
         </div>
 
         {/* Error Alert */}
@@ -674,4 +703,6 @@ function WhalePageContent() {
       </div>
     </div>
   );
-}
+});
+
+WhalePageContent.displayName = 'WhalePageContent';

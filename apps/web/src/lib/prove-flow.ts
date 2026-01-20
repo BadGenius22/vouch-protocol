@@ -39,8 +39,6 @@ import {
   submitProofWithVerifier,
 } from './verifier-client';
 import {
-  createLogger,
-  withTimeout,
   createTimeoutSignal,
   combineSignals,
   estimateFees,
@@ -135,13 +133,11 @@ export interface ProveFlowResult {
 }
 
 // ============================================================================
-// Constants & Logger
+// Constants
 // ============================================================================
 
 const DEFAULT_SHIELD_AMOUNT = 0.01; // 0.01 SOL
 const DEFAULT_TIMEOUT_MS = 600000; // 10 minutes for entire flow
-
-const logger = createLogger('ProveFlow');
 
 // ============================================================================
 // Network Detection
@@ -189,7 +185,6 @@ function reportProgress(
   percentage: number
 ): void {
   callback?.({ stage, message, percentage });
-  logger.debug(`${stage}: ${message} (${percentage}%)`);
 }
 
 /**
@@ -315,11 +310,8 @@ async function executeProveFlow<T>(
         } else {
           reportProgress(onProgress, 'shielding', 'ShadowWire not available, continuing...', 20);
         }
-      } catch (shieldError) {
-        // Log but continue - privacy is enhancement, not requirement
-        logger.warn('ShadowWire shield failed, continuing without privacy', {
-          error: shieldError instanceof Error ? shieldError.message : String(shieldError),
-        });
+      } catch {
+        // Continue without privacy - privacy is enhancement, not requirement
         reportProgress(onProgress, 'shielding', 'Privacy layer unavailable, continuing...', 20);
       }
     } else if (network !== 'mainnet') {
@@ -348,7 +340,6 @@ async function executeProveFlow<T>(
     const shouldUseVerifier = useVerifierService && (await isVerifierAvailable());
 
     if (shouldUseVerifier) {
-      logger.info('Using verifier service for production verification');
       reportProgress(onProgress, 'submitting', 'Verifying with secure verifier service...', 65);
 
       verification = await submitProofWithVerifier(
@@ -361,7 +352,6 @@ async function executeProveFlow<T>(
       );
       verifierServiceUsed = true;
     } else {
-      logger.info('Using direct on-chain verification');
       verification = await submitProofToChain(
         connection,
         proof,
@@ -380,7 +370,7 @@ async function executeProveFlow<T>(
         shieldTx,
         privacyUsed,
         privacyProvider,
-                verifierServiceUsed,
+        verifierServiceUsed,
         error: verification.error || 'Verification failed',
         errorStage: 'submitting',
         cleanup,
@@ -404,14 +394,13 @@ async function executeProveFlow<T>(
       transferTx,
       privacyUsed,
       privacyProvider,
-            verifierServiceUsed,
+      verifierServiceUsed,
       cleanup,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     const isAborted = errorMessage === 'Operation cancelled' || errorMessage.includes('timed out');
 
-    logger.error('Proof flow failed', error);
     reportProgress(onProgress, 'error', errorMessage, 0);
 
     return {
@@ -420,7 +409,7 @@ async function executeProveFlow<T>(
       transferTx,
       privacyUsed,
       privacyProvider,
-            verifierServiceUsed,
+      verifierServiceUsed,
       error: isAborted ? 'Operation cancelled or timed out' : errorMessage,
       errorStage: 'generating-proof',
       cleanup,

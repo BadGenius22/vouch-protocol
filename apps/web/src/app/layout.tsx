@@ -20,6 +20,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_BASE_URL || 'https://vouch-protocol.vercel.app'),
   title: 'Vouch Protocol - Anonymous Reputation Proofs',
   description:
     'Prove your on-chain credentials without revealing your identity. Zero-knowledge proofs on Solana.',

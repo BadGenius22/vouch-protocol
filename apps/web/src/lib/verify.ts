@@ -96,30 +96,15 @@ async function getDiscriminator(methodName: string): Promise<Uint8Array> {
 
 // === Program ID Management ===
 
-/**
- * Get the verifier program ID from environment or use default
- */
-function getVerifierProgramId(): PublicKey {
-  const programId = process.env.NEXT_PUBLIC_VERIFIER_PROGRAM_ID || DEFAULT_PROGRAM_ID;
-  try {
-    return new PublicKey(programId);
-  } catch {
-    if (DEBUG) console.warn('[Vouch] Invalid program ID, using default');
-    return new PublicKey(DEFAULT_PROGRAM_ID);
-  }
-}
-
-/** Cached program ID */
-let VERIFIER_PROGRAM_ID: PublicKey | null = null;
+// HARDCODED program ID to avoid any env variable issues
+const HARDCODED_PROGRAM_ID = new PublicKey('EhSkCuohWP8Sdfq6yHoKih6r2rsNoYYPZZSfpnyELuaD');
 
 /**
- * Get the verifier program ID (cached)
+ * Get the verifier program ID (hardcoded for reliability)
  */
 export function getVerifierProgram(): PublicKey {
-  if (!VERIFIER_PROGRAM_ID) {
-    VERIFIER_PROGRAM_ID = getVerifierProgramId();
-  }
-  return VERIFIER_PROGRAM_ID;
+  console.log('[Vouch] getVerifierProgram - returning hardcoded:', HARDCODED_PROGRAM_ID.toBase58());
+  return HARDCODED_PROGRAM_ID;
 }
 
 // === PDA Derivation ===

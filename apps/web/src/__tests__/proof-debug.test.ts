@@ -47,6 +47,8 @@ describe('Public Inputs Format Debug', () => {
     const commitment = computeCommitment(walletBytes, secret);
     const nullifier = computeNullifier(walletBytes, 'vouch_dev');
     const minTvl = BigInt(100000);
+    const epoch = BigInt(20000);  // Day number since Unix epoch
+    const dataHash = new Uint8Array(32).fill(0xab);  // Mock data hash
 
     // Simulate what NoirJS returns - each field element as hex string with 0x prefix
     // For u8 values, they're stored as field elements (32 bytes each)
@@ -55,6 +57,15 @@ describe('Public Inputs Format Debug', () => {
     // min_tvl as a field element (32 bytes hex with 0x prefix)
     const minTvlHex = '0x' + minTvl.toString(16).padStart(64, '0');
     simulatedPublicInputs.push(minTvlHex);
+
+    // epoch as a field element (32 bytes hex with 0x prefix)
+    const epochHex = '0x' + epoch.toString(16).padStart(64, '0');
+    simulatedPublicInputs.push(epochHex);
+
+    // data_hash bytes - each u8 as a separate field element
+    for (let i = 0; i < 32; i++) {
+      simulatedPublicInputs.push('0x' + dataHash[i].toString(16).padStart(64, '0'));
+    }
 
     // commitment bytes - each u8 as a separate field element
     for (let i = 0; i < 32; i++) {
@@ -68,9 +79,10 @@ describe('Public Inputs Format Debug', () => {
 
     console.log('Total public inputs:', simulatedPublicInputs.length);
     console.log('First input (min_tvl):', simulatedPublicInputs[0]);
-    console.log('Second input (commitment[0]):', simulatedPublicInputs[1]);
+    console.log('Second input (epoch):', simulatedPublicInputs[1]);
 
-    expect(simulatedPublicInputs.length).toBe(65); // 1 + 32 + 32
+    // Updated: 1 (min_tvl) + 1 (epoch) + 32 (data_hash) + 32 (commitment) + 32 (nullifier) = 98
+    expect(simulatedPublicInputs.length).toBe(98);
   });
 
   it('should convert public inputs to bytes for Anchor correctly', () => {

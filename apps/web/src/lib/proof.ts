@@ -681,9 +681,16 @@ export async function generateDevReputationProof(
       throw proofError;
     }
 
-    // Step 6: Validate proof size
+    // Step 6: Validate proof size and log public inputs for debugging
     validateProofSize(proofData.proof);
     validatePublicInputsSize(proofData.publicInputs);
+    debugLog('Dev Reputation Proof generated:');
+    debugLog(`  - Proof size: ${proofData.proof.length} bytes`);
+    debugLog(`  - Public inputs count: ${proofData.publicInputs.length}`);
+    if (proofData.publicInputs.length > 0) {
+      debugLog(`  - First 5 public inputs:`, proofData.publicInputs.slice(0, 5));
+      debugLog(`  - Last 5 public inputs:`, proofData.publicInputs.slice(-5));
+    }
 
     // Step 7: Calculate TTL
     const { generatedAt, expiresAt } = calculateProofExpiration(
@@ -698,6 +705,8 @@ export async function generateDevReputationProof(
       publicInputs: proofData.publicInputs,
       nullifier: bytesToHex(nullifier),
       commitment: bytesToHex(commitment),
+      epoch: epoch.toString(),
+      dataHash: bytesToHex(dataHash),
       generatedAt,
       expiresAt,
     };
@@ -887,6 +896,8 @@ export async function generateWhaleTradingProof(
       publicInputs: proofData.publicInputs,
       nullifier: bytesToHex(nullifier),
       commitment: bytesToHex(commitment),
+      epoch: epoch.toString(),
+      dataHash: bytesToHex(dataHash),
       generatedAt,
       expiresAt,
     };
@@ -976,6 +987,8 @@ export function serializeProofResult(proofResult: ProofResult): SerializedProofR
     publicInputs: proofResult.publicInputs,
     nullifier: proofResult.nullifier,
     commitment: proofResult.commitment,
+    epoch: proofResult.epoch,
+    dataHash: proofResult.dataHash,
     generatedAt: proofResult.generatedAt,
     expiresAt: proofResult.expiresAt,
   };
@@ -1024,6 +1037,8 @@ export function deserializeProofResult(serialized: SerializedProofResult): Proof
     publicInputs: serialized.publicInputs || [],
     nullifier: serialized.nullifier || '',
     commitment: serialized.commitment || '',
+    epoch: serialized.epoch || '',
+    dataHash: serialized.dataHash || '',
     generatedAt: serialized.generatedAt,
     expiresAt: serialized.expiresAt,
   };

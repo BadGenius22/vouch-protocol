@@ -115,6 +115,10 @@ export interface ProofResult {
   nullifier: string;
   /** Commitment hash (hex encoded) - links wallet to proof */
   commitment: string;
+  /** Epoch (day number since Unix epoch) - temporal binding */
+  epoch: string;
+  /** Data hash (hex encoded) - hash of private data for integrity */
+  dataHash: string;
   /** Timestamp when proof was generated (Unix ms) */
   generatedAt: number;
   /** Timestamp when proof expires (Unix ms) */
@@ -157,6 +161,10 @@ export interface SerializedProofResult {
   nullifier: string;
   /** Commitment hash (hex encoded) */
   commitment: string;
+  /** Epoch (day number since Unix epoch) - temporal binding */
+  epoch: string;
+  /** Data hash (hex encoded) - hash of private data for integrity */
+  dataHash: string;
   /** Timestamp when proof was generated (Unix ms) */
   generatedAt: number;
   /** Timestamp when proof expires (Unix ms) */

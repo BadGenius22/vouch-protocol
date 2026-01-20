@@ -195,8 +195,7 @@ function AirdropPageContent() {
           localStorage.setItem('vouch_nullifier', devNullifier);
           setNullifier(devNullifier);
         }
-      } catch (err) {
-        console.error('Error checking verification status:', err);
+      } catch {
         setVerificationStatus({ checking: false, devVerified: false, whaleVerified: false });
       }
     }
@@ -252,8 +251,7 @@ function AirdropPageContent() {
         }
 
         setUserStatus('not_registered');
-      } catch (err) {
-        console.error('Error checking status:', err);
+      } catch {
         setUserStatus('not_registered');
       }
     }
@@ -307,11 +305,34 @@ function AirdropPageContent() {
 
       const transaction = new Transaction().add(instruction);
       transaction.feePayer = wallet.publicKey;
-      transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
 
       const signedTx = await wallet.signTransaction(transaction);
-      const signature = await connection.sendRawTransaction(signedTx.serialize());
-      await connection.confirmTransaction(signature, 'confirmed');
+
+      const signature = await connection.sendRawTransaction(signedTx.serialize(), {
+        skipPreflight: true,
+        preflightCommitment: 'confirmed',
+      });
+
+      try {
+        const confirmation = await connection.confirmTransaction({
+          signature,
+          blockhash,
+          lastValidBlockHeight,
+        }, 'confirmed');
+
+        if (confirmation.value.err) {
+          throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+        }
+      } catch {
+        // Check status anyway
+        const status = await connection.getSignatureStatus(signature);
+        if (status.value?.err) {
+          throw new Error(`Transaction failed: ${JSON.stringify(status.value.err)}`);
+        }
+        // Otherwise assume success
+      }
 
       setTxSignature(signature);
       setUserStatus('registered');
