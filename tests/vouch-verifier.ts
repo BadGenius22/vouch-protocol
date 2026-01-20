@@ -126,6 +126,7 @@ describe('vouch-verifier', () => {
       expect(config.isPaused).to.be.false;
       expect(config.maxProofsPerDay).to.equal(10);
       expect(config.cooldownSeconds.toNumber()).to.equal(60);
+      expect(config.maxEpochAge.toNumber()).to.equal(7); // 7 days max epoch age
       expect(config.totalProofsVerified.toNumber()).to.equal(0);
     });
 

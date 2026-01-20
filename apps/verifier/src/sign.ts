@@ -3,6 +3,8 @@
  *
  * Signs verification results using Ed25519 so they can be verified on-chain.
  * The verifier's public key is registered on the Solana program.
+ *
+ * IMPORTANT: Message format must match Anchor program's build_attestation_message_v2
  */
 
 import { Keypair } from '@solana/web3.js';
@@ -10,6 +12,17 @@ import * as nacl from 'tweetnacl';
 import bs58 from 'bs58';
 import * as crypto from 'crypto';
 import type { VerificationResult, SignedAttestation } from './types.js';
+
+// === Constants ===
+
+// Domain separator must match Anchor program
+const DOMAIN_SEPARATOR = 'vouch_attestation_v2'; // 20 bytes
+
+// Proof type values must match Anchor program's ProofType enum
+const PROOF_TYPE_VALUES: Record<string, number> = {
+  developer: 1, // ProofType::DeveloperReputation
+  whale: 2,     // ProofType::WhaleTrading
+};
 
 // === Verifier Keypair ===
 
@@ -73,33 +86,33 @@ export function getVerifierPublicKey(): string {
  * The attestation includes:
  * - The verification result
  * - Verifier's public key
- * - Ed25519 signature
- * - Hash for on-chain storage
+ * - Ed25519 signature (over binary message matching Anchor format)
+ * - Attestation hash for on-chain storage
  */
 export function signAttestation(result: VerificationResult): SignedAttestation {
   if (!verifierKeypair) {
     initializeVerifier();
   }
 
-  // Create message to sign
-  // Format: isValid|proofType|nullifier|commitment|epoch|dataHash|verifiedAt
-  const message = createAttestationMessage(result);
-  const messageBytes = new TextEncoder().encode(message);
+  // First compute attestation hash from verification metadata
+  const metadataForHash = `${result.isValid}|${result.proofType}|${result.verifiedAt}`;
+  const attestationHash = crypto
+    .createHash('sha256')
+    .update(metadataForHash)
+    .digest();
+
+  // Build binary message matching Anchor's build_attestation_message_v2
+  // Format: domain (20) | proof_type (1) | nullifier (32) | epoch (8) | data_hash (32) | attestation_hash (32) = 125 bytes
+  const messageBytes = buildAttestationMessageV2(result, attestationHash);
 
   // Sign with Ed25519
   const signature = nacl.sign.detached(messageBytes, verifierKeypair!.secretKey);
-
-  // Create attestation hash (for on-chain storage)
-  const attestationHash = crypto
-    .createHash('sha256')
-    .update(messageBytes)
-    .digest('hex');
 
   return {
     result,
     verifier: verifierKeypair!.publicKey.toBase58(),
     signature: bs58.encode(signature),
-    attestationHash,
+    attestationHash: Buffer.from(attestationHash).toString('hex'),
   };
 }
 
@@ -107,8 +120,15 @@ export function signAttestation(result: VerificationResult): SignedAttestation {
  * Verify an attestation signature (for testing)
  */
 export function verifyAttestationSignature(attestation: SignedAttestation): boolean {
-  const message = createAttestationMessage(attestation.result);
-  const messageBytes = new TextEncoder().encode(message);
+  // Recompute attestation hash
+  const metadataForHash = `${attestation.result.isValid}|${attestation.result.proofType}|${attestation.result.verifiedAt}`;
+  const attestationHash = crypto
+    .createHash('sha256')
+    .update(metadataForHash)
+    .digest();
+
+  // Rebuild the message
+  const messageBytes = buildAttestationMessageV2(attestation.result, attestationHash);
 
   const signature = bs58.decode(attestation.signature);
   const publicKey = bs58.decode(attestation.verifier);
@@ -117,19 +137,76 @@ export function verifyAttestationSignature(attestation: SignedAttestation): bool
 }
 
 /**
- * Create the message string for signing
- * Format: isValid|proofType|nullifier|commitment|epoch|dataHash|verifiedAt
+ * Build binary attestation message matching Anchor's build_attestation_message_v2
+ *
+ * Format (125 bytes total):
+ * - Domain separator: "vouch_attestation_v2" (20 bytes)
+ * - Proof type: u8 (1 byte)
+ * - Nullifier: [u8; 32] (32 bytes)
+ * - Epoch: u64 big-endian (8 bytes)
+ * - Data hash: [u8; 32] (32 bytes)
+ * - Attestation hash: [u8; 32] (32 bytes)
  */
-function createAttestationMessage(result: VerificationResult): string {
-  return [
-    result.isValid ? '1' : '0',
-    result.proofType,
-    result.nullifier,
-    result.commitment,
-    result.epoch,
-    result.dataHash,
-    result.verifiedAt.toString(),
-  ].join('|');
+function buildAttestationMessageV2(
+  result: VerificationResult,
+  attestationHash: Uint8Array
+): Uint8Array {
+  const message = new Uint8Array(125);
+
+  // Domain separator (20 bytes)
+  const domainBytes = new TextEncoder().encode(DOMAIN_SEPARATOR);
+  message.set(domainBytes, 0);
+
+  // Proof type (1 byte)
+  const proofTypeValue = PROOF_TYPE_VALUES[result.proofType] ?? 0;
+  message[20] = proofTypeValue;
+
+  // Nullifier (32 bytes) - convert hex to bytes
+  const nullifierBytes = hexToBytes(result.nullifier);
+  message.set(nullifierBytes, 21);
+
+  // Epoch (8 bytes, big-endian)
+  const epochBigInt = BigInt(result.epoch);
+  const epochBytes = bigIntToBytes8BE(epochBigInt);
+  message.set(epochBytes, 53);
+
+  // Data hash (32 bytes) - convert hex to bytes
+  const dataHashBytes = hexToBytes(result.dataHash);
+  message.set(dataHashBytes, 61);
+
+  // Attestation hash (32 bytes)
+  message.set(attestationHash, 93);
+
+  return message;
+}
+
+/**
+ * Convert hex string to Uint8Array
+ */
+function hexToBytes(hex: string): Uint8Array {
+  const cleanHex = hex.startsWith('0x') ? hex.slice(2) : hex;
+  const bytes = new Uint8Array(cleanHex.length / 2);
+  for (let i = 0; i < cleanHex.length; i += 2) {
+    bytes[i / 2] = parseInt(cleanHex.slice(i, i + 2), 16);
+  }
+  return bytes;
+}
+
+/**
+ * Convert BigInt to 8 bytes big-endian
+ */
+function bigIntToBytes8BE(value: bigint): Uint8Array {
+  const bytes = new Uint8Array(8);
+  const mask = BigInt(0xFF);
+  bytes[0] = Number((value >> BigInt(56)) & mask);
+  bytes[1] = Number((value >> BigInt(48)) & mask);
+  bytes[2] = Number((value >> BigInt(40)) & mask);
+  bytes[3] = Number((value >> BigInt(32)) & mask);
+  bytes[4] = Number((value >> BigInt(24)) & mask);
+  bytes[5] = Number((value >> BigInt(16)) & mask);
+  bytes[6] = Number((value >> BigInt(8)) & mask);
+  bytes[7] = Number(value & mask);
+  return bytes;
 }
 
 /**

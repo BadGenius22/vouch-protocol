@@ -1293,7 +1293,11 @@ export type VouchVerifier = {
         "1. Client generates proof",
         "2. Off-chain verifier verifies proof and signs attestation",
         "3. Client submits attestation to this instruction",
-        "4. On-chain program validates signature and records result"
+        "4. On-chain program validates signature and records result",
+        "",
+        "New parameters (v2):",
+        "- epoch: Day number since Unix epoch (prevents replay attacks)",
+        "- data_hash: Hash of private data (ensures data integrity)"
       ],
       "discriminator": [
         148,
@@ -1439,6 +1443,19 @@ export type VouchVerifier = {
         },
         {
           "name": "nullifier",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "epoch",
+          "type": "u64"
+        },
+        {
+          "name": "dataHash",
           "type": {
             "array": [
               "u8",
@@ -2309,66 +2326,76 @@ export type VouchVerifier = {
     },
     {
       "code": 6014,
+      "name": "epochTooOld",
+      "msg": "Proof epoch is too old (replay attack prevention)"
+    },
+    {
+      "code": 6015,
+      "name": "epochInFuture",
+      "msg": "Proof epoch is in the future (clock manipulation)"
+    },
+    {
+      "code": 6016,
       "name": "nameTooLong",
       "msg": "Campaign name too long (max 64 chars)"
     },
     {
-      "code": 6015,
+      "code": 6017,
       "name": "invalidDeadline",
       "msg": "Registration deadline must be in the future"
     },
     {
-      "code": 6016,
+      "code": 6018,
       "name": "invalidAmount",
       "msg": "Amount must be greater than zero"
     },
     {
-      "code": 6017,
+      "code": 6019,
       "name": "campaignNotOpen",
       "msg": "Campaign is not open for registration"
     },
     {
-      "code": 6018,
+      "code": 6020,
       "name": "registrationClosed",
       "msg": "Campaign registration period has closed"
     },
     {
-      "code": 6019,
+      "code": 6021,
       "name": "nullifierNotVerified",
       "msg": "Nullifier has not been verified (no Vouch credential)"
     },
     {
-      "code": 6020,
+      "code": 6022,
       "name": "invalidShadowWireAddress",
       "msg": "Invalid ShadowWire address format"
     },
     {
-      "code": 6021,
+      "code": 6023,
       "name": "alreadyDistributed",
       "msg": "Airdrop has already been distributed to this registration"
     },
     {
-      "code": 6022,
+      "code": 6024,
       "name": "campaignNotClosed",
       "msg": "Campaign must be closed before completing"
     },
     {
-      "code": 6023,
+      "code": 6025,
       "name": "invalidCampaign",
       "msg": "Registration does not belong to this campaign"
     },
     {
-      "code": 6024,
+      "code": 6026,
       "name": "insufficientFunds",
       "msg": "Insufficient funds in campaign vault"
     },
     {
-      "code": 6025,
+      "code": 6027,
       "name": "alreadyClaimed",
       "msg": "Airdrop has already been claimed"
     },
     {
-      "code": 6026,
+      "code": 6028,
       "name": "invalidMint",
       "msg": "Token mint does not match campaign"
     }
@@ -2928,6 +2955,25 @@ export type VouchVerifier = {
             }
           },
           {
+            "name": "epoch",
+            "docs": [
+              "Epoch (day number) when proof was generated"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "dataHash",
+            "docs": [
+              "Hash of private data for integrity verification"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
             "name": "verifier",
             "type": "pubkey"
           },
@@ -3078,6 +3124,13 @@ export type VouchVerifier = {
             "type": "i64"
           },
           {
+            "name": "maxEpochAge",
+            "docs": [
+              "Maximum age of epoch in days (proofs older than this are rejected)"
+            ],
+            "type": "u64"
+          },
+          {
             "name": "totalProofsVerified",
             "docs": [
               "Total proofs verified across all wallets"
@@ -3112,6 +3165,10 @@ export type VouchVerifier = {
             "type": "i64"
           },
           {
+            "name": "maxEpochAge",
+            "type": "u64"
+          },
+          {
             "name": "timestamp",
             "type": "i64"
           }
@@ -3139,6 +3196,25 @@ export type VouchVerifier = {
           {
             "name": "usedAt",
             "type": "i64"
+          },
+          {
+            "name": "epoch",
+            "docs": [
+              "Epoch (day number) when proof was generated - prevents replay attacks"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "dataHash",
+            "docs": [
+              "Hash of private data - ensures data integrity"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           },
           {
             "name": "proofType",

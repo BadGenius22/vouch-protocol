@@ -18,6 +18,8 @@ pub const DEFAULT_MAX_PROOFS_PER_DAY: u32 = 10;
 pub const DEFAULT_COOLDOWN_SECONDS: i64 = 60;
 /// Seconds in a day for rate limit reset
 pub const SECONDS_PER_DAY: i64 = 86400;
+/// Default max epoch age: 7 days (proofs older than this are rejected)
+pub const DEFAULT_MAX_EPOCH_AGE: u64 = 7;
 
 /// Vouch Protocol - ZK Proof Verifier
 ///
@@ -44,6 +46,7 @@ pub mod vouch_verifier {
         config.pause_authority = ctx.accounts.admin.key();
         config.max_proofs_per_day = DEFAULT_MAX_PROOFS_PER_DAY;
         config.cooldown_seconds = DEFAULT_COOLDOWN_SECONDS;
+        config.max_epoch_age = DEFAULT_MAX_EPOCH_AGE;
         config.total_proofs_verified = 0;
         config.bump = ctx.bumps.config;
 
@@ -51,6 +54,7 @@ pub mod vouch_verifier {
             admin: config.admin,
             max_proofs_per_day: config.max_proofs_per_day,
             cooldown_seconds: config.cooldown_seconds,
+            max_epoch_age: config.max_epoch_age,
             timestamp: Clock::get()?.unix_timestamp,
         });
 
@@ -216,11 +220,17 @@ pub mod vouch_verifier {
     /// 2. Off-chain verifier verifies proof and signs attestation
     /// 3. Client submits attestation to this instruction
     /// 4. On-chain program validates signature and records result
+    ///
+    /// New parameters (v2):
+    /// - epoch: Day number since Unix epoch (prevents replay attacks)
+    /// - data_hash: Hash of private data (ensures data integrity)
     pub fn record_attestation(
         ctx: Context<RecordAttestation>,
         attestation_hash: [u8; 32],
         proof_type_value: u8,
         nullifier: [u8; 32],
+        epoch: u64,
+        data_hash: [u8; 32],
         signature: [u8; 64],
     ) -> Result<()> {
         let config = &ctx.accounts.config;
@@ -233,14 +243,23 @@ pub mod vouch_verifier {
         let verifier_account = &ctx.accounts.verifier_account;
         require!(verifier_account.is_active, VouchError::VerifierNotAuthorized);
 
+        // Validate epoch is recent (within max_epoch_age days)
+        let current_epoch = (now as u64) / 86400; // Day number since Unix epoch
+        let epoch_age = current_epoch.saturating_sub(epoch);
+        require!(epoch_age <= config.max_epoch_age, VouchError::EpochTooOld);
+        // Also reject future epochs (clock manipulation attempt)
+        require!(epoch <= current_epoch + 1, VouchError::EpochInFuture);
+
         // Check and update rate limits
         let rate_limit = &mut ctx.accounts.rate_limit;
         check_and_update_rate_limit(rate_limit, config, now)?;
 
-        // Build the attestation message that was signed
-        let message = build_attestation_message(
+        // Build the attestation message that was signed (v2 format with epoch and data_hash)
+        let message = build_attestation_message_v2(
             proof_type_value,
             &nullifier,
+            epoch,
+            &data_hash,
             &attestation_hash,
         );
 
@@ -258,10 +277,12 @@ pub mod vouch_verifier {
         let nullifier_account = &ctx.accounts.nullifier_account;
         require!(!nullifier_account.is_used, VouchError::NullifierAlreadyUsed);
 
-        // Mark nullifier as used
+        // Mark nullifier as used and store epoch/data_hash
         let nullifier_account = &mut ctx.accounts.nullifier_account;
         nullifier_account.is_used = true;
         nullifier_account.used_at = now;
+        nullifier_account.epoch = epoch;
+        nullifier_account.data_hash = data_hash;
         nullifier_account.proof_type = match proof_type_value {
             1 => ProofType::DeveloperReputation,
             2 => ProofType::WhaleTrading,
@@ -285,6 +306,8 @@ pub mod vouch_verifier {
         emit!(AttestationRecorded {
             nullifier,
             attestation_hash,
+            epoch,
+            data_hash,
             verifier: verifier_account.verifier,
             proof_type: nullifier_account.proof_type,
             recipient: ctx.accounts.recipient.key(),
@@ -322,6 +345,8 @@ pub mod vouch_verifier {
         nullifier_account.nullifier = nullifier;
         nullifier_account.is_used = false;
         nullifier_account.used_at = 0;
+        nullifier_account.epoch = 0;
+        nullifier_account.data_hash = [0u8; 32];
         nullifier_account.proof_type = ProofType::Unset;
         nullifier_account.bump = ctx.bumps.nullifier_account;
 
@@ -754,8 +779,9 @@ fn check_and_update_rate_limit(
     Ok(())
 }
 
-/// Build the attestation message that the verifier signs
+/// Build the attestation message that the verifier signs (v1 - deprecated)
 /// Format: "vouch_attestation" | proof_type (1 byte) | nullifier (32 bytes) | attestation_hash (32 bytes)
+#[allow(dead_code)]
 pub fn build_attestation_message(
     proof_type_value: u8,
     nullifier: &[u8; 32],
@@ -770,6 +796,32 @@ pub fn build_attestation_message(
     message[18..50].copy_from_slice(nullifier);
     // Attestation hash (32 bytes)
     message[50..82].copy_from_slice(attestation_hash);
+    message
+}
+
+/// Build the attestation message that the verifier signs (v2 - with epoch and data_hash)
+/// Format: "vouch_attestation_v2" | proof_type (1 byte) | nullifier (32 bytes) | epoch (8 bytes) | data_hash (32 bytes) | attestation_hash (32 bytes)
+/// Total: 20 + 1 + 32 + 8 + 32 + 32 = 125 bytes
+pub fn build_attestation_message_v2(
+    proof_type_value: u8,
+    nullifier: &[u8; 32],
+    epoch: u64,
+    data_hash: &[u8; 32],
+    attestation_hash: &[u8; 32],
+) -> [u8; 125] {
+    let mut message = [0u8; 125];
+    // Domain separator: "vouch_attestation_v2" (20 bytes)
+    message[0..20].copy_from_slice(b"vouch_attestation_v2");
+    // Proof type (1 byte)
+    message[20] = proof_type_value;
+    // Nullifier (32 bytes)
+    message[21..53].copy_from_slice(nullifier);
+    // Epoch (8 bytes, big-endian)
+    message[53..61].copy_from_slice(&epoch.to_be_bytes());
+    // Data hash (32 bytes)
+    message[61..93].copy_from_slice(data_hash);
+    // Attestation hash (32 bytes)
+    message[93..125].copy_from_slice(attestation_hash);
     message
 }
 
@@ -975,7 +1027,7 @@ pub struct RemoveVerifier<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(attestation_hash: [u8; 32], proof_type_value: u8, nullifier: [u8; 32])]
+#[instruction(attestation_hash: [u8; 32], proof_type_value: u8, nullifier: [u8; 32], epoch: u64, data_hash: [u8; 32])]
 pub struct RecordAttestation<'info> {
     #[account(
         mut,
@@ -1293,6 +1345,8 @@ pub struct ConfigAccount {
     pub max_proofs_per_day: u32,
     /// Cooldown seconds between proofs
     pub cooldown_seconds: i64,
+    /// Maximum age of epoch in days (proofs older than this are rejected)
+    pub max_epoch_age: u64,
     /// Total proofs verified across all wallets
     pub total_proofs_verified: u64,
     /// PDA bump
@@ -1342,6 +1396,10 @@ pub struct NullifierAccount {
     pub nullifier: [u8; 32],
     pub is_used: bool,
     pub used_at: i64,
+    /// Epoch (day number) when proof was generated - prevents replay attacks
+    pub epoch: u64,
+    /// Hash of private data - ensures data integrity
+    pub data_hash: [u8; 32],
     pub proof_type: ProofType,
     pub bump: u8,
 }
@@ -1444,6 +1502,7 @@ pub struct ConfigInitialized {
     pub admin: Pubkey,
     pub max_proofs_per_day: u32,
     pub cooldown_seconds: i64,
+    pub max_epoch_age: u64,
     pub timestamp: i64,
 }
 
@@ -1500,6 +1559,10 @@ pub struct VerifierRemoved {
 pub struct AttestationRecorded {
     pub nullifier: [u8; 32],
     pub attestation_hash: [u8; 32],
+    /// Epoch (day number) when proof was generated
+    pub epoch: u64,
+    /// Hash of private data for integrity verification
+    pub data_hash: [u8; 32],
     pub verifier: Pubkey,
     pub proof_type: ProofType,
     pub recipient: Pubkey,
@@ -1629,6 +1692,12 @@ pub enum VouchError {
 
     #[msg("Arithmetic overflow")]
     Overflow,
+
+    #[msg("Proof epoch is too old (replay attack prevention)")]
+    EpochTooOld,
+
+    #[msg("Proof epoch is in the future (clock manipulation)")]
+    EpochInFuture,
 
     // === Airdrop Errors ===
 
