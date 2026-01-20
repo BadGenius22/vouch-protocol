@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, memo } from 'react';
 import { useUnifiedWallet } from '@jup-ag/wallet-adapter';
 import { useWalletReady, useSolanaConnection } from '@/components/providers';
 import { GlowCard } from '@/components/ui/glow-card';
@@ -63,7 +63,7 @@ export default function DeveloperPage() {
   return <DeveloperPageContent />;
 }
 
-function DeveloperPageContent() {
+const DeveloperPageContent = memo(function DeveloperPageContent() {
   const wallet = useUnifiedWallet();
   const connection = useSolanaConnection();
 
@@ -665,4 +665,6 @@ function DeveloperPageContent() {
       </GlowCard>
     </div>
   );
-}
+});
+
+DeveloperPageContent.displayName = 'DeveloperPageContent';

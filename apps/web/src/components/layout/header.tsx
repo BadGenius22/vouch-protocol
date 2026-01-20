@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { WalletButton } from '@/components/wallet/wallet-button';
 import { cn } from '@/lib/utils';
 import { Menu, X, Code2, Wallet, Home, Gift } from 'lucide-react';
@@ -11,11 +11,23 @@ export function Header() {
   const pathname = usePathname();
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement>(null);
 
+  // Use Intersection Observer instead of scroll listener (better performance)
   useEffect(() => {
-    const handleScroll = () => setScrolled(window.scrollY > 20);
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        // When sentinel is not intersecting (scrolled past), header is scrolled
+        setScrolled(!entry.isIntersecting);
+      },
+      { threshold: 0 }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
   }, []);
 
   // Close mobile menu on route change
@@ -32,9 +44,17 @@ export function Header() {
     { href: '/airdrop', label: 'Airdrops', icon: Gift },
   ];
 
+  // Memoized toggle handler to prevent unnecessary re-renders
+  const handleMenuToggle = useCallback(() => {
+    setMobileMenuOpen((prev) => !prev);
+  }, []);
+
   return (
-    <header
-      className={cn(
+    <>
+      {/* Scroll sentinel - observed by IntersectionObserver */}
+      <div ref={sentinelRef} className="absolute top-0 left-0 h-5 w-full pointer-events-none" aria-hidden="true" />
+      <header
+        className={cn(
         'sticky top-0 z-50 transition-all duration-300',
         scrolled
           ? 'bg-background/80 backdrop-blur-xl border-b border-border/50 shadow-lg shadow-primary/5'
@@ -86,7 +106,7 @@ export function Header() {
                 ? 'bg-primary/20 text-primary'
                 : 'text-muted-foreground hover:text-foreground hover:bg-primary/10'
             )}
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            onClick={handleMenuToggle}
             aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
             aria-expanded={mobileMenuOpen}
           >
@@ -135,5 +155,6 @@ export function Header() {
         </div>
       </div>
     </header>
+    </>
   );
 }

@@ -418,17 +418,17 @@ export async function getTradingVolume(
 
     const cutoffTimestamp = Math.floor(Date.now() / 1000) - daysBack * 24 * 60 * 60;
 
-    // Get SOL price for USD conversion
-    const solPriceUsd = await getSolPriceUsd();
-
-    // Get transaction signatures with retry
-    const signatures = await withRetry(
-      () =>
-        helius.connection.getSignaturesForAddress(new PublicKey(walletAddress), {
-          limit: MAX_SIGNATURES_TRADING,
-        }),
-      'getSignaturesForAddress'
-    );
+    // Fetch SOL price and transaction signatures in parallel (performance optimization)
+    const [solPriceUsd, signatures] = await Promise.all([
+      getSolPriceUsd(),
+      withRetry(
+        () =>
+          helius.connection.getSignaturesForAddress(new PublicKey(walletAddress), {
+            limit: MAX_SIGNATURES_TRADING,
+          }),
+        'getSignaturesForAddress'
+      ),
+    ]);
 
     // Filter signatures within the time period
     const recentSignatures = signatures.filter(
