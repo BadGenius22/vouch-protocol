@@ -4,3 +4,4 @@ type = "bin"
 authors = ["Vouch Protocol"]
 
 [dependencies]
+vouch_lib = { path = "../vouch_lib" }

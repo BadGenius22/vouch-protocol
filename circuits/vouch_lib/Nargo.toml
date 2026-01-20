@@ -1,0 +1,6 @@
+[package]
+name = "vouch_lib"
+type = "lib"
+authors = ["Vouch Protocol"]
+
+[dependencies]

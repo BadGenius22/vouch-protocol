@@ -149,18 +149,20 @@ function computeCommitment(walletBytes: Uint8Array, secret: Uint8Array): Uint8Ar
 }
 
 /**
- * Compute nullifier = blake2s(wallet_pubkey || domain_separator || zeros)
+ * Compute nullifier with temporal binding = blake2s(wallet_pubkey || domain_separator || epoch)
  *
- * The nullifier serves as a unique identifier for each wallet per proof type:
- * - Deterministic: same wallet always produces same nullifier for same proof type
+ * The nullifier serves as a unique identifier for each wallet per proof type per epoch:
+ * - Deterministic: same wallet + same epoch always produces same nullifier
  * - Unlinkable: cannot derive wallet address from nullifier
  * - Domain-separated: different nullifiers for dev vs whale proofs
+ * - Time-bound: different nullifiers for different epochs (prevents replay attacks)
  *
  * @param walletBytes - 32-byte wallet pubkey hash
  * @param domainSeparator - Domain separator string (e.g., "vouch_dev" or "vouch_whale")
+ * @param epoch - Epoch value for temporal binding (e.g., day number)
  * @returns 32-byte nullifier hash
  */
-function computeNullifier(walletBytes: Uint8Array, domainSeparator: string): Uint8Array {
+function computeNullifier(walletBytes: Uint8Array, domainSeparator: string, epoch: bigint): Uint8Array {
   if (walletBytes.length !== 32) {
     throw new VouchError('Wallet bytes must be 32 bytes', VouchErrorCode.PROOF_GENERATION_FAILED);
   }
@@ -172,25 +174,121 @@ function computeNullifier(walletBytes: Uint8Array, domainSeparator: string): Uin
     throw new VouchError('Domain separator too long', VouchErrorCode.PROOF_GENERATION_FAILED);
   }
 
-  // Create preimage: wallet_pubkey (32 bytes) || domain (up to 32 bytes, rest zeros)
-  const preimage = new Uint8Array(64);
+  // Create preimage: wallet_pubkey (32 bytes) || domain (up to 32 bytes padded) || epoch (8 bytes)
+  // Total: 72 bytes (matches circuit)
+  const preimage = new Uint8Array(72);
   preimage.set(walletBytes, 0);
   preimage.set(domainBytes, 32);
-  // Rest is already zeros (as required by circuit)
+  // Domain is zero-padded to 32 bytes (positions 32-63)
+
+  // Append epoch as big-endian bytes at position 64-71
+  const epochBytes = bigIntToBytes8(epoch);
+  preimage.set(epochBytes, 64);
 
   return blake2s(preimage, undefined, 32);
+}
+
+/**
+ * Convert a BigInt to 8 big-endian bytes
+ */
+function bigIntToBytes8(value: bigint): Uint8Array {
+  const bytes = new Uint8Array(8);
+  bytes[0] = Number((value >> 56n) & 0xFFn);
+  bytes[1] = Number((value >> 48n) & 0xFFn);
+  bytes[2] = Number((value >> 40n) & 0xFFn);
+  bytes[3] = Number((value >> 32n) & 0xFFn);
+  bytes[4] = Number((value >> 24n) & 0xFFn);
+  bytes[5] = Number((value >> 16n) & 0xFFn);
+  bytes[6] = Number((value >> 8n) & 0xFFn);
+  bytes[7] = Number(value & 0xFFn);
+  return bytes;
+}
+
+/**
+ * Compute data hash for TVL amounts (for dev reputation circuit)
+ * Hash: blake2s(tvl_amounts as 64 bytes - up to 8 u64 values)
+ *
+ * @param tvlAmounts - Array of TVL amounts (5 values, padded to 8)
+ * @returns 32-byte data hash
+ */
+function computeTvlDataHash(tvlAmounts: bigint[]): Uint8Array {
+  // Pack up to 8 u64 values into 64 bytes (8 * 8 bytes)
+  const dataBytes = new Uint8Array(64);
+
+  for (let i = 0; i < Math.min(8, tvlAmounts.length); i++) {
+    const bytes = bigIntToBytes8(tvlAmounts[i]);
+    dataBytes.set(bytes, i * 8);
+  }
+
+  return blake2s(dataBytes, undefined, 32);
+}
+
+/**
+ * Compute data hash for trade amounts (for whale trading circuit)
+ * Hash: blake2s(blake2s(first_10_trades) || blake2s(second_10_trades))
+ *
+ * This matches the circuit's compute_trade_data_hash function which hashes
+ * trades in two rounds to avoid large preimage sizes.
+ *
+ * @param tradeAmounts - Array of trade amounts (20 values)
+ * @returns 32-byte data hash
+ */
+function computeTradeDataHash(tradeAmounts: bigint[]): Uint8Array {
+  // First half: hash first 10 trades (80 bytes)
+  const firstHalf = new Uint8Array(80);
+  for (let i = 0; i < 10; i++) {
+    const amount = i < tradeAmounts.length ? tradeAmounts[i] : 0n;
+    const bytes = bigIntToBytes8(amount);
+    firstHalf.set(bytes, i * 8);
+  }
+  const hash1 = blake2s(firstHalf, undefined, 32);
+
+  // Second half: hash second 10 trades (80 bytes)
+  const secondHalf = new Uint8Array(80);
+  for (let i = 0; i < 10; i++) {
+    const idx = 10 + i;
+    const amount = idx < tradeAmounts.length ? tradeAmounts[idx] : 0n;
+    const bytes = bigIntToBytes8(amount);
+    secondHalf.set(bytes, i * 8);
+  }
+  const hash2 = blake2s(secondHalf, undefined, 32);
+
+  // Combine: blake2s(hash1 || hash2)
+  const combined = new Uint8Array(64);
+  combined.set(hash1, 0);
+  combined.set(hash2, 32);
+
+  return blake2s(combined, undefined, 32);
+}
+
+/**
+ * Get current epoch as day number since Unix epoch
+ * This provides daily granularity for nullifier binding
+ *
+ * @returns Current day number as bigint
+ */
+function getCurrentEpoch(): bigint {
+  const now = Date.now();
+  const dayInMs = 24 * 60 * 60 * 1000;
+  return BigInt(Math.floor(now / dayInMs));
 }
 
 /**
  * Compute the nullifier hash for a wallet address
  *
  * This is used to check if a wallet has already proven for a specific proof type.
+ * The nullifier is now time-bound with an epoch parameter.
  *
  * @param walletAddress - Base58 wallet address
  * @param proofType - Type of proof ('developer' or 'whale')
+ * @param epoch - Optional epoch value (defaults to current day)
  * @returns Nullifier hash as hex string (64 characters)
  */
-export function computeNullifierForWallet(walletAddress: string, proofType: 'developer' | 'whale'): string {
+export function computeNullifierForWallet(
+  walletAddress: string,
+  proofType: 'developer' | 'whale',
+  epoch?: bigint
+): string {
   // Convert wallet address to bytes (use first 32 bytes of base58 decoded)
   const bs58 = require('bs58');
   const walletBytes = new Uint8Array(bs58.decode(walletAddress));
@@ -204,7 +302,10 @@ export function computeNullifierForWallet(walletAddress: string, proofType: 'dev
     ? CIRCUIT_CONSTANTS.DOMAIN_SEPARATOR_DEV
     : CIRCUIT_CONSTANTS.DOMAIN_SEPARATOR_WHALE;
 
-  const nullifierBytes = computeNullifier(walletBytes, domainSeparator);
+  // Use provided epoch or current day
+  const effectiveEpoch = epoch ?? getCurrentEpoch();
+
+  const nullifierBytes = computeNullifier(walletBytes, domainSeparator, effectiveEpoch);
 
   // Convert to hex string
   return Buffer.from(nullifierBytes).toString('hex');
@@ -496,16 +597,26 @@ export async function generateDevReputationProof(
     // Convert wallet to 32-byte representation
     const walletBytes = walletToBytes32(input.walletPubkey);
 
-    // Compute commitment and nullifier
+    // Get current epoch (day number) for temporal binding
+    const epoch = getCurrentEpoch();
+
+    // Compute commitment (not time-bound - links wallet to proof)
     const commitment = computeCommitment(walletBytes, secret);
-    const nullifier = computeNullifier(walletBytes, CIRCUIT_CONSTANTS.DOMAIN_SEPARATOR_DEV);
+
+    // Compute nullifier with epoch (time-bound - prevents replay attacks)
+    const nullifier = computeNullifier(walletBytes, CIRCUIT_CONSTANTS.DOMAIN_SEPARATOR_DEV, epoch);
 
     // Prepare TVL amounts with validation (pad to MAX_PROGRAMS)
     const tvlAmounts: string[] = new Array(CIRCUIT_CONSTANTS.MAX_PROGRAMS).fill('0');
+    const tvlAmountsBigInt: bigint[] = new Array(CIRCUIT_CONSTANTS.MAX_PROGRAMS).fill(0n);
     const programCount = Math.min(input.programs.length, CIRCUIT_CONSTANTS.MAX_PROGRAMS);
     for (let i = 0; i < programCount; i++) {
       tvlAmounts[i] = sanitizeAmount(input.programs[i].estimatedTVL, `program ${i + 1} TVL`);
+      tvlAmountsBigInt[i] = BigInt(Math.floor(input.programs[i].estimatedTVL));
     }
+
+    // Compute data hash for private data integrity verification
+    const dataHash = computeTvlDataHash(tvlAmountsBigInt);
 
     // Prepare circuit inputs (using InputMap format for NoirJS)
     const circuitInputs: InputMap = {
@@ -514,6 +625,8 @@ export async function generateDevReputationProof(
       program_count: programCount.toString(),
       tvl_amounts: tvlAmounts,
       min_tvl: sanitizeAmount(input.minTvl, 'minimum TVL'),
+      epoch: epoch.toString(),
+      data_hash: bytesToNumberArray(dataHash),
       commitment: bytesToNumberArray(commitment),
       nullifier: bytesToNumberArray(nullifier),
     };
@@ -661,12 +774,18 @@ export async function generateWhaleTradingProof(
     // Convert wallet to 32-byte representation
     const walletBytes = walletToBytes32(input.walletPubkey);
 
-    // Compute commitment and nullifier
+    // Get current epoch (day number) for temporal binding
+    const epoch = getCurrentEpoch();
+
+    // Compute commitment (not time-bound - links wallet to proof)
     const commitment = computeCommitment(walletBytes, secret);
-    const nullifier = computeNullifier(walletBytes, CIRCUIT_CONSTANTS.DOMAIN_SEPARATOR_WHALE);
+
+    // Compute nullifier with epoch (time-bound - prevents replay attacks)
+    const nullifier = computeNullifier(walletBytes, CIRCUIT_CONSTANTS.DOMAIN_SEPARATOR_WHALE, epoch);
 
     // Prepare trade amounts with validation (pad to MAX_TRADES)
     const tradeAmounts: string[] = new Array(CIRCUIT_CONSTANTS.MAX_TRADES).fill('0');
+    const tradeAmountsBigInt: bigint[] = new Array(CIRCUIT_CONSTANTS.MAX_TRADES).fill(0n);
     const amounts = input.tradingData.amounts || [];
 
     // Bound the amounts array to MAX_TRADES
@@ -678,12 +797,17 @@ export async function generateWhaleTradingProof(
       // Use individual amounts (bounded to MAX_TRADES)
       for (let i = 0; i < boundedAmountsCount; i++) {
         tradeAmounts[i] = sanitizeAmount(amounts[i], `trade ${i + 1} amount`);
+        tradeAmountsBigInt[i] = BigInt(Math.floor(amounts[i]));
       }
     } else if (input.tradingData.totalVolume > 0) {
       // If no individual amounts provided, put total volume in first slot
       // This is valid as long as total >= threshold
       tradeAmounts[0] = sanitizeAmount(input.tradingData.totalVolume, 'total volume');
+      tradeAmountsBigInt[0] = BigInt(Math.floor(input.tradingData.totalVolume));
     }
+
+    // Compute data hash for private data integrity verification
+    const dataHash = computeTradeDataHash(tradeAmountsBigInt);
 
     // Prepare circuit inputs
     const circuitInputs: InputMap = {
@@ -692,6 +816,8 @@ export async function generateWhaleTradingProof(
       trade_count: tradeCount.toString(),
       trade_amounts: tradeAmounts,
       min_volume: sanitizeAmount(input.minVolume, 'minimum volume'),
+      epoch: epoch.toString(),
+      data_hash: bytesToNumberArray(dataHash),
       commitment: bytesToNumberArray(commitment),
       nullifier: bytesToNumberArray(nullifier),
     };

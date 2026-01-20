@@ -1,2 +1,2 @@
 [workspace]
-members = ["dev_reputation", "whale_trading"]
+members = ["vouch_lib", "dev_reputation", "whale_trading"]
