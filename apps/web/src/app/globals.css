@@ -4,38 +4,38 @@
 
 @layer base {
   :root {
-    /* Cyberpunk Dark Theme - Default */
-    --background: 240 10% 4%;           /* #0a0a0f - deep space black */
-    --foreground: 210 40% 98%;          /* off-white text */
+    /* Clean Dark Theme */
+    --background: 0 0% 4%;              /* #0a0a0a - deep black */
+    --foreground: 0 0% 98%;             /* off-white text */
 
-    /* Card surfaces with glassmorphism */
-    --card: 240 10% 8%;                 /* slightly elevated surface */
-    --card-foreground: 210 40% 98%;
+    /* Card surfaces */
+    --card: 0 0% 8%;                    /* slightly elevated surface */
+    --card-foreground: 0 0% 98%;
 
-    /* Neon cyan - primary accent */
-    --primary: 180 100% 50%;            /* #00ffff - cyan neon */
-    --primary-foreground: 240 10% 4%;
+    /* White - primary accent */
+    --primary: 0 0% 100%;               /* white */
+    --primary-foreground: 0 0% 4%;
 
-    /* Neon purple - secondary accent */
-    --secondary: 270 100% 65%;          /* #9945ff - purple neon */
-    --secondary-foreground: 210 40% 98%;
+    /* Neutral - secondary accent */
+    --secondary: 0 0% 70%;              /* light gray */
+    --secondary-foreground: 0 0% 98%;
 
-    /* Matrix green - success/accent states */
-    --accent: 150 100% 50%;             /* #00ff88 - matrix green */
-    --accent-foreground: 240 10% 4%;
+    /* Green - success/accent states */
+    --accent: 142 76% 45%;              /* green for success */
+    --accent-foreground: 0 0% 4%;
 
     /* Muted elements */
-    --muted: 240 5% 15%;
-    --muted-foreground: 215 20% 55%;
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 55%;
 
     /* Borders */
-    --border: 240 5% 20%;
-    --input: 240 5% 12%;
-    --ring: 180 100% 50%;
+    --border: 0 0% 20%;
+    --input: 0 0% 12%;
+    --ring: 0 0% 100%;
 
     /* Destructive */
     --destructive: 0 90% 60%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive-foreground: 0 0% 98%;
 
     --radius: 0.75rem;
   }
@@ -77,23 +77,11 @@
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--primary) / 0.5);
+    background: rgba(255, 255, 255, 0.3);
   }
 }
 
 @layer utilities {
-  /* Text glow utilities */
-  .text-glow-cyan {
-    text-shadow: 0 0 10px rgba(0, 255, 255, 0.8), 0 0 20px rgba(0, 255, 255, 0.5), 0 0 30px rgba(0, 255, 255, 0.3);
-  }
-
-  .text-glow-purple {
-    text-shadow: 0 0 10px rgba(153, 69, 255, 0.8), 0 0 20px rgba(153, 69, 255, 0.5), 0 0 30px rgba(153, 69, 255, 0.3);
-  }
-
-  .text-glow-green {
-    text-shadow: 0 0 10px rgba(0, 255, 136, 0.8), 0 0 20px rgba(0, 255, 136, 0.5), 0 0 30px rgba(0, 255, 136, 0.3);
-  }
 
   /* Gradient shift animation for loading bars */
   @keyframes gradient-shift {

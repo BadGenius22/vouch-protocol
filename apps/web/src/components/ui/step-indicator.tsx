@@ -37,25 +37,25 @@ export function StepIndicator({
               <div
                 className={cn(
                   'w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all duration-500',
-                  isCompleted && 'bg-primary border-primary shadow-neon-cyan',
-                  isCurrent && 'border-primary bg-primary/20 animate-pulse-glow shadow-neon-cyan',
-                  !isCompleted && !isCurrent && 'border-muted-foreground/30 bg-muted/50'
+                  isCompleted && 'bg-white border-white',
+                  isCurrent && 'border-white bg-white/20 animate-pulse',
+                  !isCompleted && !isCurrent && 'border-white/20 bg-white/5'
                 )}
               >
                 {isCompleted ? (
-                  <Check className="w-5 h-5 text-primary-foreground" />
+                  <Check className="w-5 h-5 text-black" />
                 ) : isCurrent ? (
-                  <Loader2 className="w-5 h-5 text-primary animate-spin" />
+                  <Loader2 className="w-5 h-5 text-white animate-spin" />
                 ) : (
-                  <span className="text-sm font-mono text-muted-foreground">{index + 1}</span>
+                  <span className="text-sm font-mono text-neutral-500">{index + 1}</span>
                 )}
               </div>
               <span
                 className={cn(
                   'text-xs mt-2 font-medium transition-colors whitespace-nowrap',
-                  isCompleted && 'text-primary',
-                  isCurrent && 'text-primary text-glow-cyan',
-                  !isCompleted && !isCurrent && 'text-muted-foreground'
+                  isCompleted && 'text-white',
+                  isCurrent && 'text-white',
+                  !isCompleted && !isCurrent && 'text-neutral-500'
                 )}
               >
                 {step.label}
@@ -69,8 +69,8 @@ export function StepIndicator({
                   className={cn(
                     'h-0.5 transition-all duration-500 rounded-full',
                     isPast || isCompleted
-                      ? 'bg-gradient-to-r from-primary to-primary shadow-[0_0_8px_rgba(0,255,255,0.5)]'
-                      : 'bg-muted-foreground/20'
+                      ? 'bg-white'
+                      : 'bg-white/10'
                   )}
                 />
               </div>

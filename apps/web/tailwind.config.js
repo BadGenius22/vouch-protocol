@@ -39,11 +39,10 @@ module.exports = {
           DEFAULT: 'hsl(var(--card))',
           foreground: 'hsl(var(--card-foreground))',
         },
-        // Glow colors for neon effects
+        // Glow colors
         glow: {
-          cyan: 'rgba(0, 255, 255, 0.5)',
-          purple: 'rgba(153, 69, 255, 0.5)',
-          green: 'rgba(0, 255, 136, 0.5)',
+          white: 'rgba(255, 255, 255, 0.5)',
+          green: 'rgba(34, 197, 94, 0.5)',
         },
       },
       fontFamily: {
@@ -62,9 +61,6 @@ module.exports = {
         'glow-lg': '0 0 40px var(--tw-shadow-color)',
         'glow-xl': '0 0 60px var(--tw-shadow-color)',
         'inner-glow': 'inset 0 0 20px var(--tw-shadow-color)',
-        'neon-cyan': '0 0 5px rgba(0,255,255,0.5), 0 0 20px rgba(0,255,255,0.3), 0 0 40px rgba(0,255,255,0.2)',
-        'neon-purple': '0 0 5px rgba(153,69,255,0.5), 0 0 20px rgba(153,69,255,0.3), 0 0 40px rgba(153,69,255,0.2)',
-        'neon-green': '0 0 5px rgba(0,255,136,0.5), 0 0 20px rgba(0,255,136,0.3), 0 0 40px rgba(0,255,136,0.2)',
       },
       animation: {
         'pulse-glow': 'pulse-glow 2s ease-in-out infinite',
@@ -122,8 +118,8 @@ module.exports = {
         },
       },
       backgroundImage: {
-        'grid-pattern': 'linear-gradient(rgba(0,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(0,255,255,0.03) 1px, transparent 1px)',
-        'grid-pattern-dense': 'linear-gradient(rgba(0,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(0,255,255,0.05) 1px, transparent 1px)',
+        'grid-pattern': 'linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)',
+        'grid-pattern-dense': 'linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)',
         'radial-glow': 'radial-gradient(ellipse at center, var(--tw-gradient-from) 0%, transparent 70%)',
         'radial-glow-sm': 'radial-gradient(ellipse at center, var(--tw-gradient-from) 0%, transparent 50%)',
       },

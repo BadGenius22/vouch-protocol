@@ -102,20 +102,10 @@ export function ProofLoading({
   return (
     <div
       className={cn(
-        'relative p-8 rounded-xl border border-primary/20 bg-card/50 backdrop-blur-sm overflow-hidden',
+        'relative p-8 rounded-xl border border-white/10 bg-white/5 backdrop-blur-sm overflow-hidden',
         className
       )}
     >
-      {/* Animated background grid */}
-      <div className="absolute inset-0 bg-grid-pattern bg-grid opacity-20" aria-hidden="true" />
-
-      {/* Scan line */}
-      {['loading', 'preparing', 'generating'].includes(status) && (
-        <div className="absolute inset-0 overflow-hidden" aria-hidden="true">
-          <div className="absolute inset-x-0 h-px bg-gradient-to-r from-transparent via-primary to-transparent animate-scan-line" />
-        </div>
-      )}
-
       <div className="relative z-10">
         {/* Central visualization */}
         <div className="flex justify-center mb-8">
@@ -123,7 +113,7 @@ export function ProofLoading({
             {/* Outer ring */}
             <div
               className={cn(
-                'absolute inset-0 rounded-full border-2 border-primary/30',
+                'absolute inset-0 rounded-full border-2 border-white/20',
                 ['loading', 'preparing', 'generating'].includes(status) && 'animate-spin-slow'
               )}
             />
@@ -131,7 +121,7 @@ export function ProofLoading({
             {/* Middle ring */}
             <div
               className={cn(
-                'absolute inset-2 rounded-full border border-primary/50',
+                'absolute inset-2 rounded-full border border-white/30',
                 ['loading', 'preparing', 'generating'].includes(status) && 'animate-spin-slow'
               )}
               style={{
@@ -143,7 +133,7 @@ export function ProofLoading({
             {/* Inner ring */}
             <div
               className={cn(
-                'absolute inset-4 rounded-full border border-secondary/50',
+                'absolute inset-4 rounded-full border border-white/40',
                 ['loading', 'preparing', 'generating'].includes(status) && 'animate-spin-slow'
               )}
               style={{ animationDuration: '4s' }}
@@ -153,35 +143,23 @@ export function ProofLoading({
             <div
               className={cn(
                 'absolute inset-6 rounded-full flex items-center justify-center transition-all duration-500',
-                ['loading', 'preparing', 'generating'].includes(status) && 'bg-primary/20',
-                status === 'success' && 'bg-accent/20',
-                status === 'error' && 'bg-destructive/20'
+                ['loading', 'preparing', 'generating'].includes(status) && 'bg-white/10',
+                status === 'success' && 'bg-green-500/20',
+                status === 'error' && 'bg-red-500/20'
               )}
             >
               {status === 'success' ? (
                 fromCache ? (
-                  <Zap className="w-8 h-8 text-accent" />
+                  <Zap className="w-8 h-8 text-green-400" />
                 ) : (
-                  <Check className="w-8 h-8 text-accent" />
+                  <Check className="w-8 h-8 text-green-400" />
                 )
               ) : status === 'error' ? (
-                <X className="w-8 h-8 text-destructive" />
+                <X className="w-8 h-8 text-red-400" />
               ) : (
-                <div className="w-3 h-3 rounded-full bg-primary animate-pulse-glow shadow-neon-cyan" />
+                <div className="w-3 h-3 rounded-full bg-white animate-pulse" />
               )}
             </div>
-
-            {/* Glow effect */}
-            <div
-              className={cn(
-                'absolute inset-0 rounded-full blur-xl transition-opacity duration-500',
-                ['loading', 'preparing', 'generating'].includes(status) && 'bg-primary/20 opacity-100',
-                status === 'success' && 'bg-accent/20 opacity-100',
-                status === 'error' && 'bg-destructive/20 opacity-100',
-                !['loading', 'preparing', 'generating', 'success', 'error'].includes(status) && 'opacity-0'
-              )}
-              aria-hidden="true"
-            />
           </div>
         </div>
 
@@ -198,9 +176,9 @@ export function ProofLoading({
                     <div
                       className={cn(
                         'w-8 h-8 rounded-full flex items-center justify-center border transition-all duration-300',
-                        isComplete && 'bg-accent/20 border-accent text-accent',
-                        isActive && 'bg-primary/20 border-primary text-primary animate-pulse',
-                        !isComplete && !isActive && 'bg-muted/20 border-muted-foreground/30 text-muted-foreground/50'
+                        isComplete && 'bg-green-500/20 border-green-500 text-green-400',
+                        isActive && 'bg-white/10 border-white text-white animate-pulse',
+                        !isComplete && !isActive && 'bg-white/5 border-white/20 text-neutral-500'
                       )}
                     >
                       {isComplete ? <Check className="w-4 h-4" /> : <StepIcon className="w-4 h-4" />}
@@ -208,42 +186,31 @@ export function ProofLoading({
                     <span
                       className={cn(
                         'text-[10px] mt-1 font-mono',
-                        isActive && 'text-primary',
-                        isComplete && 'text-accent',
-                        !isComplete && !isActive && 'text-muted-foreground/50'
+                        isActive && 'text-white',
+                        isComplete && 'text-green-400',
+                        !isComplete && !isActive && 'text-neutral-500'
                       )}
                     >
                       {step.label}
                     </span>
-                    {/* Connector line */}
-                    {index < PROOF_STEPS.length - 2 && (
-                      <div
-                        className={cn(
-                          'absolute h-px w-12 top-4 left-1/2 ml-4',
-                          isComplete ? 'bg-accent' : 'bg-muted-foreground/20'
-                        )}
-                        style={{ transform: `translateX(${(index - 1) * 100}%)` }}
-                        aria-hidden="true"
-                      />
-                    )}
                   </div>
                 );
               })}
             </div>
 
             {/* Progress bar */}
-            <div className="h-1 bg-muted rounded-full overflow-hidden">
+            <div className="h-1 bg-white/10 rounded-full overflow-hidden">
               <div
-                className="h-full bg-gradient-to-r from-primary via-secondary to-primary rounded-full transition-all duration-300 animate-gradient-shift"
+                className="h-full bg-white rounded-full transition-all duration-300"
                 style={{ width: `${Math.max(progress, 5)}%` }}
               />
             </div>
             <div className="flex justify-between items-center mt-2">
-              <span className="text-xs text-muted-foreground font-mono flex items-center gap-1">
+              <span className="text-xs text-neutral-400 font-mono flex items-center gap-1">
                 <Clock className="w-3 h-3" />
                 {estimatedTimeRemaining || 'Generating proof'}
               </span>
-              <span className="text-xs text-primary font-mono">{progress.toFixed(0)}%</span>
+              <span className="text-xs text-white font-mono">{progress.toFixed(0)}%</span>
             </div>
           </div>
         )}
@@ -252,13 +219,13 @@ export function ProofLoading({
         <div className="text-center min-h-[48px]">
           <p className="font-mono text-sm">
             {['loading', 'preparing', 'generating'].includes(status) && (
-              <span className="text-primary">
+              <span className="text-white">
                 {displayedText}
                 <span className="animate-pulse">|</span>
               </span>
             )}
             {status === 'success' && (
-              <span className="text-accent text-glow-green flex items-center justify-center gap-2">
+              <span className="text-green-400 flex items-center justify-center gap-2">
                 {fromCache ? (
                   <>
                     <Zap className="w-4 h-4" />
@@ -270,10 +237,10 @@ export function ProofLoading({
               </span>
             )}
             {status === 'error' && (
-              <span className="text-destructive">
+              <span className="text-red-400">
                 Proof generation failed.
                 {errorDetails && (
-                  <span className="block text-xs mt-1 text-destructive/70">{errorDetails}</span>
+                  <span className="block text-xs mt-1 text-red-400/70">{errorDetails}</span>
                 )}
               </span>
             )}
@@ -283,7 +250,7 @@ export function ProofLoading({
         {/* Cache indicator for success */}
         {status === 'success' && fromCache && (
           <div className="mt-4 text-center">
-            <span className="text-xs text-muted-foreground font-mono">
+            <span className="text-xs text-neutral-400 font-mono">
               Retrieved from local cache (instant)
             </span>
           </div>
