@@ -15,7 +15,7 @@
   <a href="#-how-it-works">How It Works</a> •
   <a href="#-api-reference">API</a> •
   <a href="#-examples">Examples</a> •
-  <a href="docs/INTEGRATION_GUIDE.md">Integration Guide</a>
+  <a href="INTEGRATION_GUIDE.md">Integration Guide</a>
 </p>
 
 <p align="center">
