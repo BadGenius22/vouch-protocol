@@ -21,19 +21,19 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_BASE_URL || 'https://vouch-protocol.vercel.app'),
-  title: 'Vouch Protocol - Anonymous Reputation Proofs',
+  title: 'Vouch Protocol - Anonymous On-Chain Reputation Proofs on Solana',
   description:
-    'Prove your on-chain credentials without revealing your identity. Zero-knowledge proofs on Solana.',
-  keywords: ['ZK proofs', 'Solana', 'anonymous', 'reputation', 'blockchain', 'privacy'],
+    'Prove your on-chain credentials without revealing your wallet identity. Zero-knowledge proofs for developers, traders, and token airdrops on Solana.',
+  keywords: ['ZK proofs', 'Solana', 'anonymous', 'reputation', 'blockchain', 'privacy', 'zero-knowledge', 'airdrop'],
   icons: {
     icon: '/logos/vouch-icon.svg',
     shortcut: '/logos/vouch-icon.svg',
     apple: '/logos/vouch-icon.svg',
   },
   openGraph: {
-    title: 'Vouch Protocol - Anonymous Reputation Proofs',
+    title: 'Vouch Protocol - Anonymous On-Chain Reputation Proofs on Solana',
     description:
-      'Prove your on-chain credentials without revealing your identity. Zero-knowledge proofs on Solana.',
+      'Prove your on-chain credentials without revealing your wallet identity. Zero-knowledge proofs for developers, traders, and token airdrops on Solana.',
     url: 'https://vouch-protocol.vercel.app',
     siteName: 'Vouch Protocol',
     images: [
@@ -49,9 +49,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Vouch Protocol - Anonymous Reputation Proofs',
+    title: 'Vouch Protocol - Anonymous On-Chain Reputation Proofs on Solana',
     description:
-      'Prove your on-chain credentials without revealing your identity. Zero-knowledge proofs on Solana.',
+      'Prove your on-chain credentials without revealing your wallet identity. Zero-knowledge proofs for developers, traders, and token airdrops on Solana.',
     images: ['/og-image.png'],
   },
 };
