@@ -2,7 +2,7 @@
 
 import React from "react";
 import { motion } from "motion/react";
-import { Folder, HeartHandshakeIcon, SparklesIcon } from "lucide-react";
+import { Folder, HeartHandshake, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface DatabaseWithRestApiProps {
@@ -106,7 +106,7 @@ const DatabaseWithRestApi = ({
         </g>
         {/* Buttons */}
         <g stroke="currentColor" fill="none" strokeWidth="0.4">
-          {/* First Button */}
+          {/* First Button - Prove */}
           <g>
             <rect
               fill="#18181B"
@@ -116,7 +116,7 @@ const DatabaseWithRestApi = ({
               height="10"
               rx="5"
             ></rect>
-            <DatabaseIcon x="18" y="7.5"></DatabaseIcon>
+            <ShieldIcon x="18" y="7.5"></ShieldIcon>
             <text
               x="28"
               y="12"
@@ -128,7 +128,7 @@ const DatabaseWithRestApi = ({
               {badgeTexts?.first || "GET"}
             </text>
           </g>
-          {/* Second Button */}
+          {/* Second Button - Verify */}
           <g>
             <rect
               fill="#18181B"
@@ -138,7 +138,7 @@ const DatabaseWithRestApi = ({
               height="10"
               rx="5"
             ></rect>
-            <DatabaseIcon x="64" y="7.5"></DatabaseIcon>
+            <CheckIcon x="64" y="7.5"></CheckIcon>
             <text
               x="74"
               y="12"
@@ -150,7 +150,7 @@ const DatabaseWithRestApi = ({
               {badgeTexts?.second || "POST"}
             </text>
           </g>
-          {/* Third Button */}
+          {/* Third Button - Nullify */}
           <g>
             <rect
               fill="#18181B"
@@ -160,7 +160,7 @@ const DatabaseWithRestApi = ({
               height="10"
               rx="5"
             ></rect>
-            <DatabaseIcon x="112" y="7.5"></DatabaseIcon>
+            <NullifyIcon x="112" y="7.5"></NullifyIcon>
             <text
               x="122"
               y="12"
@@ -172,7 +172,7 @@ const DatabaseWithRestApi = ({
               {badgeTexts?.third || "PUT"}
             </text>
           </g>
-          {/* Fourth Button */}
+          {/* Fourth Button - On-Chain */}
           <g>
             <rect
               fill="#18181B"
@@ -182,7 +182,7 @@ const DatabaseWithRestApi = ({
               height="10"
               rx="5"
             ></rect>
-            <DatabaseIcon x="154" y="7.5"></DatabaseIcon>
+            <ChainIcon x="154" y="7.5"></ChainIcon>
             <text
               x="165"
               y="12"
@@ -241,7 +241,7 @@ const DatabaseWithRestApi = ({
         <div className="absolute -bottom-4 h-[100px] w-[62%] rounded-lg bg-accent/30" />
         {/* box title */}
         <div className="absolute -top-3 z-20 flex items-center justify-center rounded-lg border bg-[#101112] px-2 py-1 sm:-top-4 sm:py-1.5">
-          <SparklesIcon className="size-3" />
+          <Sparkles className="size-3" />
           <span className="ml-2 text-[10px]">
             {title ? title : "Data exchange using a customized REST API"}
           </span>
@@ -254,7 +254,7 @@ const DatabaseWithRestApi = ({
         <div className="relative z-10 flex h-[150px] w-full items-center justify-center overflow-hidden rounded-lg border bg-background shadow-md">
           {/* Badges */}
           <div className="absolute bottom-8 left-12 z-10 h-7 rounded-full bg-[#101112] px-3 text-xs border flex items-center gap-2 ">
-            <HeartHandshakeIcon className="size-4" />
+            <HeartHandshake className="size-4" />
             <span>{buttonTexts?.first || "LegionDev"}</span>
           </div>
           <div className="absolute right-16 z-10 hidden h-7 rounded-full bg-[#101112] px-3 text-xs sm:flex border items-center gap-2">
@@ -298,7 +298,8 @@ const DatabaseWithRestApi = ({
 
 export default DatabaseWithRestApi;
 
-const DatabaseIcon = ({ x = "0", y = "0" }: { x: string; y: string }) => {
+// Prove - Shield icon
+const ShieldIcon = ({ x = "0", y = "0" }: { x: string; y: string }) => {
   return (
     <svg
       x={x}
@@ -313,9 +314,73 @@ const DatabaseIcon = ({ x = "0", y = "0" }: { x: string; y: string }) => {
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      <ellipse cx="12" cy="5" rx="9" ry="3" />
-      <path d="M3 5V19A9 3 0 0 0 21 19V5" />
-      <path d="M3 12A9 3 0 0 0 21 12" />
+      <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+    </svg>
+  );
+};
+
+// Verify - Check icon
+const CheckIcon = ({ x = "0", y = "0" }: { x: string; y: string }) => {
+  return (
+    <svg
+      x={x}
+      y={y}
+      xmlns="http://www.w3.org/2000/svg"
+      width="5"
+      height="5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="white"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+      <polyline points="22 4 12 14.01 9 11.01" />
+    </svg>
+  );
+};
+
+// Nullify - Ban/slash icon
+const NullifyIcon = ({ x = "0", y = "0" }: { x: string; y: string }) => {
+  return (
+    <svg
+      x={x}
+      y={y}
+      xmlns="http://www.w3.org/2000/svg"
+      width="5"
+      height="5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="white"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="m4.9 4.9 14.2 14.2" />
+    </svg>
+  );
+};
+
+// On-Chain - Link icon
+const ChainIcon = ({ x = "0", y = "0" }: { x: string; y: string }) => {
+  return (
+    <svg
+      x={x}
+      y={y}
+      xmlns="http://www.w3.org/2000/svg"
+      width="5"
+      height="5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="white"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
     </svg>
   );
 };
