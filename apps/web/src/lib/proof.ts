@@ -193,14 +193,15 @@ function computeNullifier(walletBytes: Uint8Array, domainSeparator: string, epoc
  */
 function bigIntToBytes8(value: bigint): Uint8Array {
   const bytes = new Uint8Array(8);
-  bytes[0] = Number((value >> 56n) & 0xFFn);
-  bytes[1] = Number((value >> 48n) & 0xFFn);
-  bytes[2] = Number((value >> 40n) & 0xFFn);
-  bytes[3] = Number((value >> 32n) & 0xFFn);
-  bytes[4] = Number((value >> 24n) & 0xFFn);
-  bytes[5] = Number((value >> 16n) & 0xFFn);
-  bytes[6] = Number((value >> 8n) & 0xFFn);
-  bytes[7] = Number(value & 0xFFn);
+  const mask = BigInt(0xFF);
+  bytes[0] = Number((value >> BigInt(56)) & mask);
+  bytes[1] = Number((value >> BigInt(48)) & mask);
+  bytes[2] = Number((value >> BigInt(40)) & mask);
+  bytes[3] = Number((value >> BigInt(32)) & mask);
+  bytes[4] = Number((value >> BigInt(24)) & mask);
+  bytes[5] = Number((value >> BigInt(16)) & mask);
+  bytes[6] = Number((value >> BigInt(8)) & mask);
+  bytes[7] = Number(value & mask);
   return bytes;
 }
 
@@ -237,7 +238,7 @@ function computeTradeDataHash(tradeAmounts: bigint[]): Uint8Array {
   // First half: hash first 10 trades (80 bytes)
   const firstHalf = new Uint8Array(80);
   for (let i = 0; i < 10; i++) {
-    const amount = i < tradeAmounts.length ? tradeAmounts[i] : 0n;
+    const amount = i < tradeAmounts.length ? tradeAmounts[i] : BigInt(0);
     const bytes = bigIntToBytes8(amount);
     firstHalf.set(bytes, i * 8);
   }
@@ -247,7 +248,7 @@ function computeTradeDataHash(tradeAmounts: bigint[]): Uint8Array {
   const secondHalf = new Uint8Array(80);
   for (let i = 0; i < 10; i++) {
     const idx = 10 + i;
-    const amount = idx < tradeAmounts.length ? tradeAmounts[idx] : 0n;
+    const amount = idx < tradeAmounts.length ? tradeAmounts[idx] : BigInt(0);
     const bytes = bigIntToBytes8(amount);
     secondHalf.set(bytes, i * 8);
   }
@@ -608,7 +609,7 @@ export async function generateDevReputationProof(
 
     // Prepare TVL amounts with validation (pad to MAX_PROGRAMS)
     const tvlAmounts: string[] = new Array(CIRCUIT_CONSTANTS.MAX_PROGRAMS).fill('0');
-    const tvlAmountsBigInt: bigint[] = new Array(CIRCUIT_CONSTANTS.MAX_PROGRAMS).fill(0n);
+    const tvlAmountsBigInt: bigint[] = new Array(CIRCUIT_CONSTANTS.MAX_PROGRAMS).fill(BigInt(0));
     const programCount = Math.min(input.programs.length, CIRCUIT_CONSTANTS.MAX_PROGRAMS);
     for (let i = 0; i < programCount; i++) {
       tvlAmounts[i] = sanitizeAmount(input.programs[i].estimatedTVL, `program ${i + 1} TVL`);
@@ -785,7 +786,7 @@ export async function generateWhaleTradingProof(
 
     // Prepare trade amounts with validation (pad to MAX_TRADES)
     const tradeAmounts: string[] = new Array(CIRCUIT_CONSTANTS.MAX_TRADES).fill('0');
-    const tradeAmountsBigInt: bigint[] = new Array(CIRCUIT_CONSTANTS.MAX_TRADES).fill(0n);
+    const tradeAmountsBigInt: bigint[] = new Array(CIRCUIT_CONSTANTS.MAX_TRADES).fill(BigInt(0));
     const amounts = input.tradingData.amounts || [];
 
     // Bound the amounts array to MAX_TRADES

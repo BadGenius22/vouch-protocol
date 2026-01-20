@@ -71,6 +71,12 @@ importers:
       '@coral-xyz/anchor':
         specifier: ^0.32.0
         version: 0.32.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
+      '@noir-lang/noir_js':
+        specifier: 1.0.0-beta.18
+        version: 1.0.0-beta.18
+      '@noir-lang/types':
+        specifier: 1.0.0-beta.18
+        version: 1.0.0-beta.18
       '@solana/web3.js':
         specifier: ^1.95.0
         version: 1.98.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)

@@ -5,7 +5,7 @@
  * This provides cryptographic verification that was previously a placeholder.
  */
 
-import { UltraHonkBackend } from '@aztec/bb.js';
+import { Barretenberg, UltraHonkBackend } from '@aztec/bb.js';
 import { Noir } from '@noir-lang/noir_js';
 import type { CompiledCircuit } from '@noir-lang/types';
 import * as fs from 'fs';
@@ -16,9 +16,40 @@ import type { ProofType, VerificationResult } from './types.js';
 
 const CIRCUITS_DIR = process.env.CIRCUITS_DIR || path.join(__dirname, '../../web/public/circuits');
 
+// Shared Barretenberg API (expensive WASM initialization - do once)
+let sharedApi: Barretenberg | null = null;
+let sharedApiPromise: Promise<Barretenberg> | null = null;
+
 // Cache backends to avoid reinitialization
 const backendCache = new Map<ProofType, UltraHonkBackend>();
 const noirCache = new Map<ProofType, Noir>();
+
+// === Shared API ===
+
+/**
+ * Get or create the shared Barretenberg API instance
+ */
+async function getSharedApi(): Promise<Barretenberg> {
+  if (sharedApi) {
+    return sharedApi;
+  }
+
+  if (sharedApiPromise) {
+    return sharedApiPromise;
+  }
+
+  console.log('[Verifier] Initializing Barretenberg API...');
+  sharedApiPromise = Barretenberg.new({ threads: 1 });
+
+  try {
+    sharedApi = await sharedApiPromise;
+    console.log('[Verifier] Barretenberg API initialized');
+    return sharedApi;
+  } catch (error) {
+    sharedApiPromise = null;
+    throw error;
+  }
+}
 
 // === Circuit Loading ===
 
@@ -52,9 +83,12 @@ async function getBackend(proofType: ProofType): Promise<{ noir: Noir; backend: 
   console.log(`[Verifier] Loading ${proofType} circuit...`);
   const circuit = await loadCircuitArtifact(proofType);
 
+  // Get shared Barretenberg API
+  const api = await getSharedApi();
+
   // Initialize Noir and backend
   const noir = new Noir(circuit);
-  const backend = new UltraHonkBackend(circuit.bytecode);
+  const backend = new UltraHonkBackend(circuit.bytecode, api);
 
   // Cache for reuse
   noirCache.set(proofType, noir);
@@ -74,6 +108,8 @@ async function getBackend(proofType: ProofType): Promise<{ noir: Noir; backend: 
  * @param proofType - Type of proof (developer or whale)
  * @param nullifier - Nullifier hash (for result)
  * @param commitment - Commitment hash (for result)
+ * @param epoch - Epoch number for temporal binding (prevents replay attacks)
+ * @param dataHash - Hash of private data (ensures data integrity)
  * @returns Verification result
  */
 export async function verifyProof(
@@ -81,7 +117,9 @@ export async function verifyProof(
   publicInputsHex: string[],
   proofType: ProofType,
   nullifier: string,
-  commitment: string
+  commitment: string,
+  epoch: string,
+  dataHash: string
 ): Promise<VerificationResult> {
   try {
     // Get backend
@@ -92,6 +130,7 @@ export async function verifyProof(
 
     // Verify the proof
     console.log(`[Verifier] Verifying ${proofType} proof (${proofBytes.length} bytes)...`);
+    console.log(`[Verifier] Epoch: ${epoch}`);
 
     const isValid = await backend.verifyProof({
       proof: proofBytes,
@@ -105,6 +144,8 @@ export async function verifyProof(
       proofType,
       nullifier,
       commitment,
+      epoch,
+      dataHash,
       verifiedAt: Date.now(),
     };
   } catch (error) {
@@ -116,6 +157,8 @@ export async function verifyProof(
       proofType,
       nullifier,
       commitment,
+      epoch,
+      dataHash,
       verifiedAt: Date.now(),
     };
   }
@@ -158,17 +201,21 @@ export function getCircuitStatus(): { developer: boolean; whale: boolean } {
 export async function cleanup(): Promise<void> {
   console.log('[Verifier] Cleaning up...');
 
-  for (const [proofType, backend] of backendCache) {
-    try {
-      await backend.destroy();
-      console.log(`[Verifier] ${proofType} backend destroyed`);
-    } catch (error) {
-      console.error(`[Verifier] Error destroying ${proofType} backend:`, error);
-    }
-  }
-
+  // Clear caches
   backendCache.clear();
   noirCache.clear();
+
+  // Destroy shared Barretenberg API
+  if (sharedApi) {
+    try {
+      await sharedApi.destroy();
+      console.log('[Verifier] Barretenberg API destroyed');
+    } catch (error) {
+      console.error('[Verifier] Error destroying Barretenberg API:', error);
+    }
+    sharedApi = null;
+    sharedApiPromise = null;
+  }
 }
 
 // === Utilities ===

@@ -82,7 +82,7 @@ export function signAttestation(result: VerificationResult): SignedAttestation {
   }
 
   // Create message to sign
-  // Format: isValid|proofType|nullifier|commitment|verifiedAt
+  // Format: isValid|proofType|nullifier|commitment|epoch|dataHash|verifiedAt
   const message = createAttestationMessage(result);
   const messageBytes = new TextEncoder().encode(message);
 
@@ -118,6 +118,7 @@ export function verifyAttestationSignature(attestation: SignedAttestation): bool
 
 /**
  * Create the message string for signing
+ * Format: isValid|proofType|nullifier|commitment|epoch|dataHash|verifiedAt
  */
 function createAttestationMessage(result: VerificationResult): string {
   return [
@@ -125,6 +126,8 @@ function createAttestationMessage(result: VerificationResult): string {
     result.proofType,
     result.nullifier,
     result.commitment,
+    result.epoch,
+    result.dataHash,
     result.verifiedAt.toString(),
   ].join('|');
 }

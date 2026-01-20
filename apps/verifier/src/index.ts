@@ -61,14 +61,15 @@ app.post('/verify', async (req, res) => {
       return res.status(400).json(response);
     }
 
-    const { proof, publicInputs, proofType, nullifier, commitment } = parseResult.data;
+    const { proof, publicInputs, proofType, nullifier, commitment, epoch, dataHash } = parseResult.data;
 
     console.log(`[Verifier] Verifying ${proofType} proof...`);
     console.log(`[Verifier] Nullifier: ${nullifier.slice(0, 16)}...`);
+    console.log(`[Verifier] Epoch: ${epoch}`);
     console.log(`[Verifier] Proof size: ${proof.length} chars`);
 
     // Verify the proof
-    const result = await verifyProof(proof, publicInputs, proofType, nullifier, commitment);
+    const result = await verifyProof(proof, publicInputs, proofType, nullifier, commitment, epoch, dataHash);
 
     if (!result.isValid) {
       const response: VerifyResponse = {
