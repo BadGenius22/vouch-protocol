@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { WalletButton } from '@/components/wallet/wallet-button';
@@ -64,8 +65,14 @@ export function Header() {
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2 group">
-            <div className="w-8 h-8 rounded-lg bg-white/10 border border-white/20 flex items-center justify-center group-hover:bg-white/20 transition-all duration-300">
-              <span className="text-white font-bold text-sm">V</span>
+            <div className="w-8 h-8 relative group-hover:scale-105 transition-transform duration-300">
+              <Image
+                src="/logos/vouch-icon.svg"
+                alt="Vouch Protocol"
+                fill
+                className="object-contain"
+                priority
+              />
             </div>
             <span className="text-xl font-semibold text-white">
               Vouch
