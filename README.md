@@ -613,6 +613,33 @@ pnpm lint                   # Run ESLint
 pnpm typecheck              # TypeScript type checking
 ```
 
+### Vercel Deployment
+
+Deploy to Vercel with these settings:
+
+| Setting | Value |
+|---------|-------|
+| Root Directory | `apps/web` |
+| Framework | Next.js |
+| Build Command | `pnpm build` |
+| Install Command | `pnpm install` |
+
+**Required Environment Variables:**
+
+```bash
+NEXT_PUBLIC_SOLANA_NETWORK=devnet
+NEXT_PUBLIC_SOLANA_RPC_URL=https://api.devnet.solana.com
+NEXT_PUBLIC_VERIFIER_PROGRAM_ID=EhSkCuohWP8Sdfq6yHoKih6r2rsNoYYPZZSfpnyELuaD
+
+# For devnet, use the test verifier key from keys/verifier-keypair.json:
+VERIFIER_PRIVATE_KEY=[66,127,75,60,135,68,161,140,32,183,140,200,162,150,193,217,127,29,175,9,64,254,193,94,80,63,200,10,173,235,210,34,16,60,201,226,249,60,175,76,142,189,182,25,113,231,89,233,180,156,153,1,151,80,111,68,86,114,65,126,247,134,96,38]
+
+# Optional - for fetching real on-chain data
+HELIUS_API_KEY=your_helius_api_key
+```
+
+> **Note:** The verifier service is embedded in Next.js API routes and deploys automatically with the app.
+
 ---
 
 ## 🤝 Contributing

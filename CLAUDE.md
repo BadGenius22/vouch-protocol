@@ -169,7 +169,36 @@ NEXT_PUBLIC_SOLANA_NETWORK=devnet
 NEXT_PUBLIC_SOLANA_RPC_URL=https://api.devnet.solana.com
 NEXT_PUBLIC_VERIFIER_PROGRAM_ID=EhSkCuohWP8Sdfq6yHoKih6r2rsNoYYPZZSfpnyELuaD
 HELIUS_API_KEY=xxx  # Server-side only (optional - falls back to mock)
+
+# Verifier keypair - REQUIRED for production verification
+# Use test key from keys/verifier-keypair.json for devnet:
+VERIFIER_PRIVATE_KEY=[66,127,75,60,135,68,161,140,32,183,140,200,162,150,193,217,127,29,175,9,64,254,193,94,80,63,200,10,173,235,210,34,16,60,201,226,249,60,175,76,142,189,182,25,113,231,89,233,180,156,153,1,151,80,111,68,86,114,65,126,247,134,96,38]
 ```
+
+## Vercel Deployment
+
+The verifier service is embedded in Next.js API routes (`/api/verify`, `/api/health`).
+
+**Vercel Settings:**
+- Root Directory: `apps/web`
+- Framework: Next.js
+- Build Command: `pnpm build`
+- Install Command: `pnpm install`
+
+**Required Environment Variables:**
+| Variable | Value |
+|----------|-------|
+| `NEXT_PUBLIC_SOLANA_NETWORK` | `devnet` |
+| `NEXT_PUBLIC_SOLANA_RPC_URL` | `https://api.devnet.solana.com` |
+| `NEXT_PUBLIC_VERIFIER_PROGRAM_ID` | `EhSkCuohWP8Sdfq6yHoKih6r2rsNoYYPZZSfpnyELuaD` |
+| `VERIFIER_PRIVATE_KEY` | (see above - JSON array format) |
+| `HELIUS_API_KEY` | Optional - for real on-chain data |
+
+## Test Keypairs
+
+Devnet test keys in `keys/` are intentionally committed:
+- `vouch_verifier-keypair.json` - Program ID: `EhSkCuohWP8Sdfq6yHoKih6r2rsNoYYPZZSfpnyELuaD`
+- `verifier-keypair.json` - Verifier pubkey: `26PHXVn171FimBEzPxguk2HtjkNMeBqRuochUtMKzwHf`
 
 ## Version Compatibility
 

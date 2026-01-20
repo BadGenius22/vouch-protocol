@@ -200,3 +200,8 @@ pnpm test:coverage
 **Verifier keypair changes on restart?**
 - Expected in development (ephemeral keypair)
 - Set `VERIFIER_PRIVATE_KEY` env var for persistent keypair
+- For devnet, use the pre-registered test key:
+  ```bash
+  VERIFIER_PRIVATE_KEY=[66,127,75,60,135,68,161,140,32,183,140,200,162,150,193,217,127,29,175,9,64,254,193,94,80,63,200,10,173,235,210,34,16,60,201,226,249,60,175,76,142,189,182,25,113,231,89,233,180,156,153,1,151,80,111,68,86,114,65,126,247,134,96,38]
+  ```
+  Public key: `26PHXVn171FimBEzPxguk2HtjkNMeBqRuochUtMKzwHf`
