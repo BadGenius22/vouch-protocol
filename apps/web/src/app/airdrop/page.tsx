@@ -3,8 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useUnifiedWallet } from '@jup-ag/wallet-adapter';
 import { useWalletReady, useSolanaConnection } from '@/components/providers';
-import { GlowCard } from '@/components/ui/glow-card';
-import { GlowButton } from '@/components/ui/glow-button';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { WalletButton } from '@/components/wallet/wallet-button';
 import { AirdropClaim } from '@/components/airdrop/AirdropClaim';
 import { type AirdropCampaign } from '@/lib/airdrop-registry';
@@ -81,15 +81,15 @@ function StepIndicator({ currentStep }: { currentStep: 1 | 2 | 3 }) {
                   isCompleted
                     ? 'bg-green-500 text-white'
                     : isCurrent
-                      ? 'bg-gradient-to-r from-cyan-500 to-purple-500 text-white ring-2 ring-cyan-400/50'
-                      : 'bg-slate-800 text-slate-500'
+                      ? 'bg-white text-black'
+                      : 'bg-white/10 text-neutral-500'
                 }`}
               >
                 {isCompleted ? <CheckCircle2 className="w-5 h-5" /> : <Icon className="w-5 h-5" />}
               </div>
               <span
                 className={`text-xs mt-2 font-medium ${
-                  isCurrent ? 'text-white' : isCompleted ? 'text-green-400' : 'text-slate-500'
+                  isCurrent ? 'text-white' : isCompleted ? 'text-green-400' : 'text-neutral-500'
                 }`}
               >
                 {step.label}
@@ -97,7 +97,7 @@ function StepIndicator({ currentStep }: { currentStep: 1 | 2 | 3 }) {
             </div>
             {i < steps.length - 1 && (
               <div
-                className={`w-12 h-0.5 mx-2 ${isCompleted ? 'bg-green-500' : 'bg-slate-700'}`}
+                className={`w-12 h-0.5 mx-2 ${isCompleted ? 'bg-green-500' : 'bg-white/10'}`}
               />
             )}
           </div>
@@ -112,12 +112,10 @@ export default function AirdropPage() {
 
   if (!walletReady) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950/20 to-slate-950">
-        <div className="container mx-auto px-4 py-8 max-w-2xl">
-          <div className="text-center py-20">
-            <Loader2 className="w-8 h-8 text-purple-500 animate-spin mx-auto mb-4" />
-            <p className="text-slate-400">Loading...</p>
-          </div>
+      <div className="min-h-screen bg-gradient-to-br from-[#000] to-[#1A2428] flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 text-white/80 animate-spin mx-auto mb-4" />
+          <p className="text-neutral-400">Loading...</p>
         </div>
       </div>
     );
@@ -344,14 +342,21 @@ function AirdropPageContent() {
         : 3;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950/20 to-slate-950">
+    <div className="min-h-screen bg-gradient-to-br from-[#000] to-[#1A2428] text-white">
       <div className="container mx-auto px-4 py-8 max-w-2xl">
         {/* Header */}
         <div className="mb-6 text-center">
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-400 via-pink-500 to-purple-600 bg-clip-text text-transparent mb-2">
+          <Badge
+            variant="secondary"
+            className="backdrop-blur-sm bg-white/10 border border-white/20 text-white hover:bg-white/20 px-4 py-2 rounded-full mb-4"
+          >
+            <Gift className="w-4 h-4 mr-2" />
+            Token Airdrop
+          </Badge>
+          <h1 className="text-3xl md:text-5xl font-semibold tracking-tight mb-2">
             VOUCH Airdrop
           </h1>
-          <p className="text-slate-400">
+          <p className="text-neutral-300">
             Claim tokens privately to any wallet
           </p>
         </div>
@@ -360,31 +365,31 @@ function AirdropPageContent() {
         <StepIndicator currentStep={currentStep} />
 
         {/* Devnet Badge */}
-        <div className="rounded-lg bg-cyan-500/10 border border-cyan-500/30 p-3 flex items-center gap-3 mb-6">
-          <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-xs font-bold rounded">
+        <div className="rounded-xl bg-white/5 border border-white/10 p-3 flex items-center gap-3 mb-6">
+          <span className="px-2 py-0.5 bg-green-500/20 text-green-400 text-xs font-bold rounded">
             DEVNET
           </span>
-          <p className="text-sm text-cyan-300">
+          <p className="text-sm text-neutral-300">
             Live on Solana Devnet - Transactions are recorded on-chain
           </p>
         </div>
 
         {/* Main Content Card */}
-        <GlowCard className="p-6">
+        <div className="backdrop-blur-sm bg-white/5 border border-white/10 rounded-xl p-6">
           {/* Loading */}
           {userStatus === 'loading' && (
             <div className="text-center py-8">
-              <Loader2 className="w-8 h-8 text-purple-500 animate-spin mx-auto mb-4" />
-              <p className="text-slate-400">Checking your status...</p>
+              <Loader2 className="w-8 h-8 text-white/80 animate-spin mx-auto mb-4" />
+              <p className="text-neutral-400">Checking your status...</p>
             </div>
           )}
 
           {/* Step 1: Connect Wallet */}
           {userStatus === 'not_connected' && (
             <div className="text-center py-6">
-              <Wallet className="w-12 h-12 text-slate-600 mx-auto mb-4" />
+              <Wallet className="w-12 h-12 text-white/20 mx-auto mb-4" />
               <h2 className="text-xl font-semibold text-white mb-2">Connect Your Wallet</h2>
-              <p className="text-slate-400 mb-6">
+              <p className="text-neutral-400 mb-6">
                 Connect to check eligibility and register for the airdrop
               </p>
               <div className="flex justify-center">
@@ -398,23 +403,23 @@ function AirdropPageContent() {
             <div className="space-y-6">
               {/* Verification Status */}
               {verificationStatus.checking ? (
-                <div className="flex items-center gap-3 p-4 rounded-lg bg-slate-800/50">
-                  <Loader2 className="w-5 h-5 text-cyan-400 animate-spin" />
-                  <span className="text-slate-300">Checking verification status...</span>
+                <div className="flex items-center gap-3 p-4 rounded-xl bg-white/5 border border-white/10">
+                  <Loader2 className="w-5 h-5 text-white/80 animate-spin" />
+                  <span className="text-neutral-300">Checking verification status...</span>
                 </div>
               ) : verificationStatus.devVerified || verificationStatus.whaleVerified ? (
-                <div className="flex items-center gap-3 p-4 rounded-lg bg-green-500/10 border border-green-500/30">
+                <div className="flex items-center gap-3 p-4 rounded-xl bg-green-500/10 border border-green-500/30">
                   <BadgeCheck className="w-5 h-5 text-green-400" />
                   <div className="flex-1">
                     <span className="text-green-300 font-medium">Verified!</span>
                     <div className="flex gap-2 mt-1">
                       {verificationStatus.whaleVerified && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-500/20 text-purple-300 text-xs rounded">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-white/10 text-white text-xs rounded">
                           <TrendingUp className="w-3 h-3" /> Whale
                         </span>
                       )}
                       {verificationStatus.devVerified && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-cyan-500/20 text-cyan-300 text-xs rounded">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-white/10 text-white text-xs rounded">
                           <Code2 className="w-3 h-3" /> Developer
                         </span>
                       )}
@@ -422,65 +427,47 @@ function AirdropPageContent() {
                   </div>
                 </div>
               ) : (
-                <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700">
-                  <p className="text-slate-300 mb-3">
-                    <span className="text-yellow-400">💡</span> Want bonus tokens? Complete a proof first:
+                <div className="p-4 rounded-xl bg-white/5 border border-white/10">
+                  <p className="text-neutral-300 mb-3">
+                    Want bonus tokens? Complete a proof first:
                   </p>
                   <div className="flex gap-3">
-                    <GlowButton
-                      variant="outline"
-                      size="sm"
+                    <Button
                       onClick={() => (window.location.href = '/developer')}
-                      className="flex-1 border-cyan-500/50"
+                      className="flex-1 text-sm px-4 py-2 h-auto rounded-xl bg-transparent text-white border border-white/20 shadow-none hover:bg-white/10 transition-none"
                     >
                       <Code2 className="w-4 h-4 mr-1" /> Dev (+50)
-                    </GlowButton>
-                    <GlowButton
-                      variant="outline"
-                      size="sm"
+                    </Button>
+                    <Button
                       onClick={() => (window.location.href = '/whale')}
-                      className="flex-1 border-purple-500/50"
+                      className="flex-1 text-sm px-4 py-2 h-auto rounded-xl bg-transparent text-white border border-white/20 shadow-none hover:bg-white/10 transition-none"
                     >
                       <TrendingUp className="w-4 h-4 mr-1" /> Whale (+150)
-                    </GlowButton>
+                    </Button>
                   </div>
                 </div>
               )}
 
               {/* Reward Display */}
               <div
-                className={`rounded-lg p-4 border ${
-                  bestProofType === 'whale'
-                    ? 'bg-purple-500/10 border-purple-500/30'
-                    : bestProofType === 'developer'
-                      ? 'bg-cyan-500/10 border-cyan-500/30'
-                      : 'bg-slate-800/50 border-slate-700'
+                className={`rounded-xl p-4 border ${
+                  bestProofType
+                    ? 'bg-green-500/5 border-green-500/30'
+                    : 'bg-white/5 border-white/10'
                 }`}
               >
                 <div className="flex justify-between items-center">
                   <div>
-                    <span className="text-sm text-slate-400">Your Reward</span>
+                    <span className="text-sm text-neutral-400">Your Reward</span>
                     {bestProofType && (
                       <span
-                        className={`ml-2 text-xs px-2 py-0.5 rounded ${
-                          bestProofType === 'whale'
-                            ? 'bg-purple-500/20 text-purple-300'
-                            : 'bg-cyan-500/20 text-cyan-300'
-                        }`}
+                        className="ml-2 text-xs px-2 py-0.5 rounded bg-green-500/20 text-green-400"
                       >
-                        {bestProofType === 'whale' ? '🐋 Whale' : '👨‍💻 Dev'} Bonus
+                        {bestProofType === 'whale' ? 'Whale' : 'Dev'} Bonus
                       </span>
                     )}
                   </div>
-                  <span
-                    className={`text-2xl font-bold ${
-                      bestProofType === 'whale'
-                        ? 'text-purple-300'
-                        : bestProofType === 'developer'
-                          ? 'text-cyan-300'
-                          : 'text-white'
-                    }`}
-                  >
+                  <span className="text-2xl font-bold text-white">
                     {rewardAmount.toFixed(0)} VOUCH
                   </span>
                 </div>
@@ -488,16 +475,16 @@ function AirdropPageContent() {
 
               {/* Error */}
               {registerError && (
-                <div className="rounded-md bg-red-500/20 p-3 text-sm text-red-300">
+                <div className="rounded-xl bg-red-500/10 border border-red-500/30 p-3 text-sm text-red-300">
                   {registerError}
                 </div>
               )}
 
               {/* Register Button */}
-              <GlowButton
+              <Button
                 onClick={handleRegister}
                 disabled={isRegistering}
-                className="w-full h-12 text-lg"
+                className="w-full text-sm px-8 py-3 h-auto rounded-xl bg-white text-black border border-white/10 shadow-none hover:bg-white/90 transition-none"
               >
                 {isRegistering ? (
                   <>
@@ -510,12 +497,12 @@ function AirdropPageContent() {
                     Register for {rewardAmount.toFixed(0)} VOUCH
                   </>
                 )}
-              </GlowButton>
+              </Button>
 
               {/* Tx Link */}
               {txSignature && (
-                <div className="space-y-2 p-3 rounded-lg bg-slate-800/50">
-                  <p className="text-xs text-slate-400 text-center">Transaction Hash:</p>
+                <div className="space-y-2 p-3 rounded-xl bg-white/5 border border-white/10">
+                  <p className="text-xs text-neutral-500 text-center">Transaction Hash:</p>
                   <p className="font-mono text-xs text-white text-center break-all">
                     {txSignature}
                   </p>
@@ -524,7 +511,7 @@ function AirdropPageContent() {
                       href={`https://solscan.io/tx/${txSignature}?cluster=devnet`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300"
+                      className="flex items-center gap-1 text-xs text-white/80 hover:text-white"
                     >
                       Solscan <ExternalLink className="w-3 h-3" />
                     </a>
@@ -532,7 +519,7 @@ function AirdropPageContent() {
                       href={`https://explorer.solana.com/tx/${txSignature}?cluster=devnet`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center gap-1 text-xs text-purple-400 hover:text-purple-300"
+                      className="flex items-center gap-1 text-xs text-white/80 hover:text-white"
                     >
                       Explorer <ExternalLink className="w-3 h-3" />
                     </a>
@@ -546,14 +533,14 @@ function AirdropPageContent() {
           {(userStatus === 'registered' || userStatus === 'claimed') && (
             <div>
               {/* Registration Success Banner */}
-              <div className="p-4 rounded-lg bg-green-500/10 border border-green-500/30 mb-6">
+              <div className="p-4 rounded-xl bg-green-500/10 border border-green-500/30 mb-6">
                 <div className="flex items-center gap-3">
                   <CheckCircle2 className="w-5 h-5 text-green-400" />
                   <div className="flex-1">
                     <p className="text-green-300 font-medium">Registered!</p>
                     <p className="text-xs text-green-400/70">
-                      {bestProofType === 'whale' && '🐋 Whale tier - 250 VOUCH'}
-                      {bestProofType === 'developer' && '👨‍💻 Developer tier - 150 VOUCH'}
+                      {bestProofType === 'whale' && 'Whale tier - 250 VOUCH'}
+                      {bestProofType === 'developer' && 'Developer tier - 150 VOUCH'}
                       {!bestProofType && 'Base tier - 100 VOUCH'}
                     </p>
                   </div>
@@ -561,14 +548,14 @@ function AirdropPageContent() {
                 <div className="mt-3 pt-3 border-t border-green-500/20">
                   {txSignature ? (
                     <>
-                      <p className="text-xs text-slate-400 mb-1">Registration TX:</p>
+                      <p className="text-xs text-neutral-400 mb-1">Registration TX:</p>
                       <div className="flex items-center gap-2">
-                        <code className="text-xs text-slate-300 truncate flex-1">{txSignature}</code>
+                        <code className="text-xs text-neutral-300 truncate flex-1">{txSignature}</code>
                         <a
                           href={`https://solscan.io/tx/${txSignature}?cluster=devnet`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-cyan-400 hover:text-cyan-300"
+                          className="text-white/80 hover:text-white"
                         >
                           <ExternalLink className="w-3 h-3" />
                         </a>
@@ -579,7 +566,7 @@ function AirdropPageContent() {
                       href={`https://solscan.io/account/${wallet.publicKey?.toBase58()}?cluster=devnet`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300"
+                      className="flex items-center gap-1 text-xs text-white/80 hover:text-white"
                     >
                       View your transactions on Solscan <ExternalLink className="w-3 h-3" />
                     </a>
@@ -591,15 +578,15 @@ function AirdropPageContent() {
               <AirdropClaim className="border-0 bg-transparent shadow-none p-0" />
             </div>
           )}
-        </GlowCard>
+        </div>
 
         {/* Privacy Info */}
-        <GlowCard className="mt-6 p-4">
+        <div className="mt-6 backdrop-blur-sm bg-white/5 border border-white/10 rounded-xl p-4">
           <h3 className="text-sm font-semibold text-white mb-2 flex items-center gap-2">
             <Shield className="w-4 h-4 text-green-400" />
             Privacy Protection
           </h3>
-          <ul className="space-y-1 text-xs text-slate-400">
+          <ul className="space-y-1 text-xs text-neutral-400">
             <li className="flex items-start gap-2">
               <CheckCircle2 className="w-3 h-3 text-green-400 mt-0.5 flex-shrink-0" />
               <span>Claim to any wallet - no one can trace it back to you</span>
@@ -613,7 +600,7 @@ function AirdropPageContent() {
               <span>Zero-knowledge proofs verify eligibility without revealing identity</span>
             </li>
           </ul>
-        </GlowCard>
+        </div>
       </div>
     </div>
   );
