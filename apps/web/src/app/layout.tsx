@@ -56,9 +56,35 @@ export const metadata: Metadata = {
   },
 };
 
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'Vouch Protocol',
+  applicationCategory: 'DeveloperApplication',
+  operatingSystem: 'Web',
+  description: 'Zero-knowledge proof-based anonymous reputation protocol for Solana. Prove on-chain credentials without revealing wallet identity.',
+  offers: {
+    '@type': 'Offer',
+    price: '0',
+    priceCurrency: 'USD',
+  },
+  author: {
+    '@type': 'Organization',
+    name: 'Vouch Protocol',
+    url: 'https://github.com/BadGenius22/vouch-protocol',
+  },
+  keywords: 'ZK proofs, Solana, anonymous, reputation, blockchain, privacy, zero-knowledge',
+};
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="dark">
+      <head>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        />
+      </head>
       <body
         className={`${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} font-sans antialiased`}
       >
