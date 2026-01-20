@@ -8,7 +8,7 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   treeshake: true,
-  minify: false,
+  minify: true,
   external: [
     // Peer dependencies - let consumers provide these
     '@solana/web3.js',
