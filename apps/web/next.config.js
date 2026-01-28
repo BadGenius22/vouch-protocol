@@ -23,6 +23,8 @@ const ContentSecurityPolicy = `
     https://aztec-ignition.s3.amazonaws.com
     https://*.s3.amazonaws.com
     https://*.amazonaws.com
+    https://crs.aztec.network
+    https://*.aztec.network
     https://*.privacycash.co
     https://privacycash.co
     https://*.radrlabs.io
