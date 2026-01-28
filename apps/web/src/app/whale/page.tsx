@@ -118,11 +118,7 @@ const WhalePageContent = memo(function WhalePageContent() {
   // Check if wallet has already verified when connected
   useEffect(() => {
     let isMounted = true;
-    const timeoutId = setTimeout(() => {
-      if (isMounted) {
-        setStep('connect');
-      }
-    }, 10000);
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     async function checkExistingVerification() {
       if (!wallet.publicKey) {
@@ -132,6 +128,14 @@ const WhalePageContent = memo(function WhalePageContent() {
       }
 
       setStep('checking');
+
+      // Set a timeout only for the checking phase
+      timeoutId = setTimeout(() => {
+        if (isMounted) {
+          // Only reset if still checking (not if verification completed)
+          setStep((currentStep) => currentStep === 'checking' ? 'connect' : currentStep);
+        }
+      }, 10000);
 
       try {
         const { computeNullifierForWallet } = await import('@/lib/proof');
@@ -152,6 +156,12 @@ const WhalePageContent = memo(function WhalePageContent() {
         const used = await isNullifierUsed(connection, nullifier);
 
         if (!isMounted) return;
+
+        // Clear timeout since check completed successfully
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
 
         // Preload circuits in background (don't block the UI)
         import('@/lib/circuit').then(({ preloadCircuits }) => {
@@ -175,7 +185,9 @@ const WhalePageContent = memo(function WhalePageContent() {
 
     return () => {
       isMounted = false;
-      clearTimeout(timeoutId);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
     };
   }, [wallet.publicKey, connection]);
 
