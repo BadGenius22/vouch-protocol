@@ -175,9 +175,35 @@ async function doLoadCircuit(circuitType: CircuitType): Promise<{
   debugLog(` Loading ${circuitType} circuit...`);
 
   try {
+    // Check SharedArrayBuffer availability (required for WASM multithreading)
+    const hasSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
+    debugLog(` SharedArrayBuffer available: ${hasSharedArrayBuffer}`);
+
+    if (!hasSharedArrayBuffer) {
+      throw new VouchError(
+        'SharedArrayBuffer not available. This is required for ZK proof generation. ' +
+        'Please ensure you are using a modern browser and the site has proper COOP/COEP headers.',
+        VouchErrorCode.CIRCUIT_LOAD_FAILED
+      );
+    }
+
     // Fetch compiled circuit from public directory
     const circuitUrl = `/circuits/${circuitType}.json`;
-    const response = await fetch(circuitUrl);
+    debugLog(` Fetching circuit from: ${circuitUrl}`);
+
+    let response: Response;
+    try {
+      response = await fetch(circuitUrl);
+    } catch (fetchError) {
+      // Network-level errors (CORS, offline, blocked, etc.)
+      const errorMsg = fetchError instanceof Error ? fetchError.message : 'Unknown fetch error';
+      console.error('[Vouch] Circuit fetch network error:', fetchError);
+      throw new VouchError(
+        `Network error fetching circuit: ${errorMsg}. Check browser console for details.`,
+        VouchErrorCode.CIRCUIT_LOAD_FAILED,
+        fetchError
+      );
+    }
 
     if (!response.ok) {
       throw new VouchError(
@@ -186,6 +212,7 @@ async function doLoadCircuit(circuitType: CircuitType): Promise<{
       );
     }
 
+    debugLog(` Circuit fetched successfully, parsing JSON...`);
     const circuit = (await response.json()) as CompiledCircuit;
 
     // Validate circuit structure
@@ -196,10 +223,22 @@ async function doLoadCircuit(circuitType: CircuitType): Promise<{
       );
     }
 
+    debugLog(` Circuit JSON valid, bytecode length: ${circuit.bytecode.length}`);
     debugLog(` Getting shared Barretenberg API...`);
 
     // Get or create the shared Barretenberg API (WASM is only loaded once)
-    const api = await getSharedApi();
+    let api: Barretenberg;
+    try {
+      api = await getSharedApi();
+    } catch (apiError) {
+      const errorMsg = apiError instanceof Error ? apiError.message : 'Unknown API error';
+      console.error('[Vouch] Barretenberg API initialization error:', apiError);
+      throw new VouchError(
+        `Failed to initialize Barretenberg WASM: ${errorMsg}`,
+        VouchErrorCode.CIRCUIT_LOAD_FAILED,
+        apiError
+      );
+    }
 
     debugLog(` Initializing UltraHonk backend...`);
 
@@ -229,9 +268,13 @@ async function doLoadCircuit(circuitType: CircuitType): Promise<{
       throw error;
     }
 
-    // Wrap other errors
+    // Wrap other errors with more context
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    const errorName = error instanceof Error ? error.name : 'UnknownError';
+    console.error(`[Vouch] Circuit load failed (${errorName}):`, error);
+
     throw new VouchError(
-      `Failed to load circuit: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      `Failed to load circuit: ${errorMsg}`,
       VouchErrorCode.CIRCUIT_LOAD_FAILED,
       error
     );

@@ -9,6 +9,8 @@ const ContentSecurityPolicy = `
   img-src 'self' blob: data: https:;
   font-src 'self' data:;
   connect-src 'self'
+    data:
+    blob:
     https://api.mainnet-beta.solana.com
     https://api.devnet.solana.com
     https://api.testnet.solana.com
