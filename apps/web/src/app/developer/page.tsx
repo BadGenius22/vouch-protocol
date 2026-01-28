@@ -194,6 +194,7 @@ const DeveloperPageContent = memo(function DeveloperPageContent() {
     const stepOrder = ['connect', 'fetch', 'ready', 'proving', 'complete'];
     if (step === 'checking') return [];
     if (step === 'already-verified') return stepOrder;
+    if (step === 'complete') return stepOrder; // All steps completed
 
     // If wallet is connected and we're at 'connect' step, 'connect' is completed
     if (step === 'connect' && wallet.publicKey) {
