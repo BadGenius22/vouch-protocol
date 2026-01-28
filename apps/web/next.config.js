@@ -21,6 +21,8 @@ const ContentSecurityPolicy = `
     https://verifier.vouch.dev
     https://*.sentry.io
     https://aztec-ignition.s3.amazonaws.com
+    https://*.s3.amazonaws.com
+    https://*.amazonaws.com
     https://*.privacycash.co
     https://privacycash.co
     https://*.radrlabs.io
